@@ -123,11 +123,10 @@ def load_records(path: str):
 def build_record(rec, source_file: str, do_trim: bool = True) -> Tuple[SequenceRecord, int]:
     raw_seq = str(rec.seq)
     corrections = 0
-    # For FASTQ the SeqRecord still contains sequence only here; qualities ignored
     if do_trim:
         seq_trimmed, trimmed_bases = trim_ns_ends(raw_seq)
         if seq_trimmed == "":
-            seq_trimmed = raw_seq  # fallback to original cleaned
+            seq_trimmed = raw_seq
     else:
         seq_trimmed = raw_seq
     cleaned, corr = clean_sequence(seq_trimmed)
@@ -331,7 +330,6 @@ def write_pdf(summary: Dict, accepted: List[SequenceRecord], rejected: List[Tupl
             c.setFont("Helvetica", 9)
     c.showPage()
     c.save()
-    # cleanup
     try:
         for p in imgs.values():
             if os.path.exists(p):
@@ -374,6 +372,8 @@ class PhageQCApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Phage QC Tool - FASTA Normalizer")
         self.resize(1100,700)
+        # store per-file accepted/rejected mapping
+        self.per_file_results: Dict[str, Tuple[List[SequenceRecord], List[Tuple[SequenceRecord,str]]]] = {}
         self.accepted: List[SequenceRecord] = []
         self.rejected: List[Tuple[SequenceRecord,str]] = []
         central = QWidget()
@@ -388,10 +388,10 @@ class PhageQCApp(QMainWindow):
         stats_layout.addWidget(self.sb_rej)
         layout.addLayout(stats_layout)
         btn_layout = QHBoxLayout()
-        self.btn_load = QPushButton("Load FASTA files")
+        self.btn_load = QPushButton("Load Files")
         self.btn_csv = QPushButton("Export CSV")
         self.btn_pdf = QPushButton("Export PDF")
-        self.btn_fasta = QPushButton("Export merged FASTA")
+        self.btn_fasta = QPushButton("Export FASTA per file")
         btn_layout.addWidget(self.btn_load)
         btn_layout.addWidget(self.btn_csv)
         btn_layout.addWidget(self.btn_pdf)
@@ -405,7 +405,7 @@ class PhageQCApp(QMainWindow):
         self.btn_load.clicked.connect(self.load_files)
         self.btn_csv.clicked.connect(self.export_csv)
         self.btn_pdf.clicked.connect(self.export_pdf)
-        self.btn_fasta.clicked.connect(self.export_fasta)
+        self.btn_fasta.clicked.connect(self.export_fasta_per_file)
 
     def load_files(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -416,6 +416,8 @@ class PhageQCApp(QMainWindow):
         )
         if not files:
             return
+        # reset
+        self.per_file_results.clear()
         self.accepted.clear()
         self.rejected.clear()
         total = len(files)
@@ -426,6 +428,9 @@ class PhageQCApp(QMainWindow):
             except Exception as e:
                 print(f"Error processing {f}: {e}")
                 continue
+            # store per-file
+            self.per_file_results[f] = (a, r)
+            # extend global lists for summary and table
             self.accepted.extend(a)
             self.rejected.extend(r)
             processed += 1
@@ -466,14 +471,32 @@ class PhageQCApp(QMainWindow):
             return
         write_pdf(self.summary, self.accepted, self.rejected, path)
 
-    def export_fasta(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save merged FASTA (accepted)", "", "FASTA Files (*.fasta *.fa)")
-        if not path:
+    def export_fasta_per_file(self):
+        """
+        For each originally loaded input file, write two FASTA files:
+        <basename>_accepted.fasta and <basename>_rejected.fasta
+        Files are saved in a user-selected directory.
+        """
+        if not self.per_file_results:
             return
-        accepted_path = path if path.endswith(".fasta") or path.endswith(".fa") else path + ".fasta"
-        rejected_path = os.path.splitext(accepted_path)[0] + "_rejected.fasta"
-        write_fasta(self.accepted, accepted_path)
-        write_fasta([r for r,_ in self.rejected], rejected_path)
+        out_dir = QFileDialog.getExistingDirectory(self, "Select output directory for FASTA files")
+        if not out_dir:
+            return
+        for infile, (accepted, rejected) in self.per_file_results.items():
+            base = os.path.splitext(os.path.basename(infile))[0]
+            acc_name = os.path.join(out_dir, f"{base}_accepted.fasta")
+            rej_name = os.path.join(out_dir, f"{base}_rejected.fasta")
+            # write accepted only if any
+            if accepted:
+                write_fasta(accepted, acc_name)
+            else:
+                # create empty file to indicate none accepted
+                open(acc_name, "w", encoding="utf-8").close()
+            # write rejected
+            if rejected:
+                write_fasta([r for r,_ in rejected], rej_name)
+            else:
+                open(rej_name, "w", encoding="utf-8").close()
 
 # =========================
 # MAIN
