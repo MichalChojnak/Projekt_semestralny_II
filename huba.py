@@ -1,130 +1,254 @@
-import streamlit as st
+import sys
+import os
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QLabel, QSpinBox,
+                             QDoubleSpinBox, QFileDialog, QTableWidget,
+                             QTableWidgetItem, QMessageBox, QHeaderView, QGroupBox)
+from PyQt6.QtCore import Qt
 from Bio import SeqIO
-import pandas as pd
-import io
 
 
-# --- FUNKCJE POMOCNICZE I OBLICZENIA BIOLOGICZNE ---
+# ==========================================
+# 1. LOGIKA BIOLOGICZNA
+# ==========================================
 
 def n_content(seq: str) -> float:
-    return seq.count('N') / len(seq) if len(seq) > 0 else 0
+    return seq.count('N') / len(seq) if len(seq) > 0 else 0.0
 
 
 def gc_content(seq: str) -> float:
     seq_upper = seq.upper()
-    g = seq_upper.count('G')
-    c = seq_upper.count('C')
-    return ((g + c) / len(seq_upper) * 100) if len(seq_upper) > 0 else 0
+    g, c = seq_upper.count('G'), seq_upper.count('C')
+    return ((g + c) / len(seq_upper)) * 100 if len(seq_upper) > 0 else 0.0
 
 
-def process_uploaded_file(uploaded_file) -> list[dict]:
-    """Wczytuje plik z przeglądarki (w pamięci) i parsuje go przez Biopython."""
+def process_file(file_path: str) -> list[dict]:
+    """Wczytuje i parsuje plik bezpośrednio z dysku."""
     records = []
-    # Streamlit zwraca plik jako bajty, musimy go zdekodować do tekstu dla Biopythona
-    stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+    ext = file_path.lower()
 
-    # Próba zgadnięcia formatu (fasta lub fastq)
-    fmt = "fasta" if uploaded_file.name.lower().endswith((".fasta", ".fa", ".fna")) else "fastq"
+    if ext.endswith((".fasta", ".fa", ".fna")):
+        fmt = "fasta"
+    elif ext.endswith((".fastq", ".fq")):
+        fmt = "fastq"
+    elif ext.endswith((".gbk", ".gb")):
+        fmt = "genbank"
+    else:
+        return records
 
-    for record in SeqIO.parse(stringio, fmt):
-        clean_seq = str(record.seq).upper().replace("-", "")
-        records.append({
-            "id": record.id,
-            "length": len(clean_seq),
-            "gc_pct": gc_content(clean_seq),
-            "n_pct": n_content(clean_seq),
-            "sequence": clean_seq,
-            "source": uploaded_file.name
-        })
+    try:
+        for record in SeqIO.parse(file_path, fmt):
+            clean_seq = str(record.seq).upper().replace("-", "")
+            records.append({
+                "id": record.id,
+                "length": len(clean_seq),
+                "gc_pct": gc_content(clean_seq),
+                "n_pct": n_content(clean_seq),
+                "sequence": clean_seq,
+                "source": os.path.basename(file_path)
+            })
+    except Exception as e:
+        print(f"Błąd czytania {file_path}: {e}")
     return records
 
 
-# --- INTERFEJS UŻYTKOWNIKA (GUI) ---
+# ==========================================
+# 2. INTERFEJS UŻYTKOWNIKA (PyQt6)
+# ==========================================
 
-# 1. Ustawienia strony
-st.set_page_config(page_title="Phage Host Predictor - QC", page_icon="🧬", layout="wide")
-st.title("🧬 Moduł Walidacji Danych Sekwencyjnych")
-st.markdown("Wgraj pliki FASTA/FASTQ, aby sprawdzić ich jakość przed uruchomieniem predykcji gospodarza.")
+class PhageQCApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🧬 Phage Host Predictor - Moduł QC")
+        self.resize(900, 600)
 
-# 2. Pasek boczny z parametrami filtrowania
-st.sidebar.header("Parametry Filtrowania")
-min_len = st.sidebar.number_input("Minimalna długość sekwencji (bp)", min_value=1, value=5000, step=100)
-max_n_pct = st.sidebar.slider("Maksymalna zawartość 'N' (%)", min_value=0.0, max_value=100.0, value=5.0) / 100.0
+        # Zmienne do przechowywania wyników
+        self.accepted_records = []
+        self.rejected_records = []
 
-# 3. Pole do wgrywania plików
-uploaded_files = st.file_uploader("Przeciągnij i upuść pliki sekwencji", accept_multiple_files=True,
-                                  type=['fasta', 'fa', 'fna', 'fastq', 'fq'])
+        # Główny widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
-if uploaded_files:
-    st.info(f"Wczytano {len(uploaded_files)} plik(ów). Rozpoczynam analizę...")
+        # --- PANEL GÓRNY (Kontrolki) ---
+        top_panel = QHBoxLayout()
 
-    all_records = []
-    for f in uploaded_files:
-        all_records.extend(process_uploaded_file(f))
+        # Grupa: Parametry
+        params_group = QGroupBox("⚙️ Parametry Filtrowania")
+        params_layout = QHBoxLayout()
 
-    if not all_records:
-        st.error("Nie udało się odczytać żadnych sekwencji z podanych plików.")
-    else:
-        # 4. Filtracja danych
-        accepted = []
-        rejected = []
+        params_layout.addWidget(QLabel("Min. długość (bp):"))
+        self.min_len_spin = QSpinBox()
+        self.min_len_spin.setRange(1, 1000000)
+        self.min_len_spin.setValue(5000)
+        self.min_len_spin.setSingleStep(500)
+        params_layout.addWidget(self.min_len_spin)
+
+        params_layout.addWidget(QLabel("Maks. 'N' (%):"))
+        self.max_n_spin = QDoubleSpinBox()
+        self.max_n_spin.setRange(0.0, 100.0)
+        self.max_n_spin.setValue(5.0)
+        params_layout.addWidget(self.max_n_spin)
+
+        params_group.setLayout(params_layout)
+        top_panel.addWidget(params_group)
+
+        # Grupa: Akcje
+        actions_group = QGroupBox("📂 Akcje")
+        actions_layout = QHBoxLayout()
+
+        self.btn_load = QPushButton("Wgraj pliki...")
+        self.btn_load.clicked.connect(self.load_files)
+        actions_layout.addWidget(self.btn_load)
+
+        self.btn_export = QPushButton("Eksportuj poprawne (FASTA)")
+        self.btn_export.setEnabled(False)  # Zablokowany, dopóki nie ma danych
+        self.btn_export.clicked.connect(self.export_fasta)
+        actions_layout.addWidget(self.btn_export)
+
+        actions_group.setLayout(actions_layout)
+        top_panel.addWidget(actions_group)
+
+        main_layout.addLayout(top_panel)
+
+        # --- PANEL ŚRODKOWY (Statystyki) ---
+        stats_layout = QHBoxLayout()
+        self.lbl_total = QLabel("Wszystkie: 0")
+        self.lbl_accepted = QLabel("Zaakceptowane: 0")
+        self.lbl_rejected = QLabel("Odrzucone: 0")
+
+        # Dodanie prostego stylowania (kolory)
+        self.lbl_accepted.setStyleSheet("color: green; font-weight: bold;")
+        self.lbl_rejected.setStyleSheet("color: red; font-weight: bold;")
+
+        stats_layout.addWidget(self.lbl_total)
+        stats_layout.addWidget(self.lbl_accepted)
+        stats_layout.addWidget(self.lbl_rejected)
+        stats_layout.addStretch()  # Wypycha statystyki na lewo
+        main_layout.addLayout(stats_layout)
+
+        # --- PANEL DOLNY (Tabela wyników) ---
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["ID Sekwencji", "Długość", "GC (%)", "N (%)", "Status", "Powód / Źródło"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        main_layout.addWidget(self.table)
+
+    # ==========================================
+    # 3. AKCJE (Obsługa przycisków)
+    # ==========================================
+
+    def load_files(self):
+        # Otwarcie okna wyboru plików
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Wybierz pliki sekwencji",
+            "",
+            "Pliki sekwencji (*.fasta *.fa *.fna *.fastq *.fq *.gbk);;Wszystkie pliki (*)"
+        )
+
+        if not files:
+            return  # Użytkownik anulował wybór
+
+        all_records = []
+        for file_path in files:
+            all_records.extend(process_file(file_path))
+
+        if not all_records:
+            QMessageBox.warning(self, "Błąd", "Nie znaleziono poprawnych sekwencji w wybranych plikach.")
+            return
+
+        self.filter_and_display(all_records)
+
+    def filter_and_display(self, all_records):
+        self.accepted_records = []
+        self.rejected_records = []
         allowed_chars = set("ACGTN")
 
+        min_len = self.min_len_spin.value()
+        max_n_pct = self.max_n_spin.value() / 100.0
+
+        # Filtrowanie
         for r in all_records:
             invalid_chars = set(r["sequence"]) - allowed_chars
             if invalid_chars:
-                r["reject_reason"] = "Niedozwolone znaki"
-                rejected.append(r)
+                r["reject_reason"] = f"Złe znaki: {', '.join(invalid_chars)}"
+                self.rejected_records.append(r)
             elif r["length"] < min_len:
-                r["reject_reason"] = "Zbyt krótka"
-                rejected.append(r)
+                r["reject_reason"] = "Za krótka"
+                self.rejected_records.append(r)
             elif r["n_pct"] > max_n_pct:
-                r["reject_reason"] = "Zbyt dużo przerw (N)"
-                rejected.append(r)
+                r["reject_reason"] = "Zbyt dużo N"
+                self.rejected_records.append(r)
             else:
-                accepted.append(r)
+                self.accepted_records.append(r)
 
-        # 5. GENEROWANIE RAPORTU / DASHBOARDU
-        st.header("📊 Raport Jakości (QC)")
+        # Aktualizacja etykiet
+        self.lbl_total.setText(f"Wszystkie: {len(all_records)}")
+        self.lbl_accepted.setText(f"Zaakceptowane: {len(self.accepted_records)}")
+        self.lbl_rejected.setText(f"Odrzucone: {len(self.rejected_records)}")
 
-        # Kolumny z głównymi metrykami (KPIs)
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Wszystkie sekwencje", len(all_records))
-        col2.metric("Zaakceptowane", len(accepted))
-        col3.metric("Odrzucone", len(rejected))
+        # Wypełnianie tabeli
+        self.table.setRowCount(len(all_records))
 
-        if accepted:
-            df_accepted = pd.DataFrame(accepted)
-            avg_len = df_accepted["length"].mean()
-            avg_gc = df_accepted["gc_pct"].mean()
+        # Najpierw wrzucamy zaakceptowane, potem odrzucone
+        row = 0
+        for r in self.accepted_records:
+            self._add_table_row(row, r, "Zaakceptowano", r["source"], Qt.GlobalColor.darkGreen)
+            row += 1
 
-            col4.metric("Średnia długość (zaakcept.)", f"{avg_len:,.0f} bp")
+        for r in self.rejected_records:
+            self._add_table_row(row, r, "Odrzucono", r["reject_reason"], Qt.GlobalColor.red)
+            row += 1
 
-            st.subheader("Szczegóły zaakceptowanych sekwencji")
-            # Wyświetlamy ładną tabelę (bez samej sekwencji, żeby nie zamulić przeglądarki)
-            st.dataframe(df_accepted[["id", "length", "gc_pct", "n_pct", "source"]].style.format(
-                {"gc_pct": "{:.1f}%", "n_pct": "{:.2%}"}), use_container_width=True)
+        # Odblokowanie przycisku eksportu, jeśli mamy co eksportować
+        self.btn_export.setEnabled(len(self.accepted_records) > 0)
 
-        if rejected:
-            with st.expander("Pokaż odrzucone sekwencje i powody"):
-                df_rejected = pd.DataFrame(rejected)
-                st.dataframe(df_rejected[["id", "length", "reject_reason", "source"]], use_container_width=True)
+    def _add_table_row(self, row, record, status_text, reason_text, color):
+        """Funkcja pomocnicza do wprowadzania danych do komórek tabeli."""
+        self.table.setItem(row, 0, QTableWidgetItem(record["id"]))
+        self.table.setItem(row, 1, QTableWidgetItem(str(record["length"])))
+        self.table.setItem(row, 2, QTableWidgetItem(f"{record['gc_pct']:.2f}"))
+        self.table.setItem(row, 3, QTableWidgetItem(f"{record['n_pct'] * 100:.2f}"))
 
-        # 6. Opcja pobrania połączonego i oczyszczonego pliku FASTA
-        if accepted:
-            st.success("✅ Walidacja zakończona. Możesz pobrać ujednolicony plik do dalszej analizy.")
+        status_item = QTableWidgetItem(status_text)
+        status_item.setForeground(color)
+        self.table.setItem(row, 4, status_item)
 
-            # Generowanie zawartości pliku FASTA w pamięci
-            fasta_output = io.StringIO()
-            for r in accepted:
-                fasta_output.write(f">{r['id']} source:{r['source']} len:{r['length']}\n")
-                # Łamanie linii co 80 znaków
-                for i in range(0, r["length"], 80):
-                    fasta_output.write(r["sequence"][i:i + 80] + "\n")
+        self.table.setItem(row, 5, QTableWidgetItem(reason_text))
 
-            st.download_button(
-                label="📥 Pobierz oczyszczony plik FASTA",
-                data=fasta_output.getvalue(),
-                file_name="zwalidowane_fagi.fasta",
-                mime="text/plain"
-            )
+    def export_fasta(self):
+        # Okno zapisu pliku
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Zapisz oczyszczony plik FASTA",
+            "zwalidowane_fagi.fasta",
+            "FASTA Files (*.fasta);;All Files (*)"
+        )
+
+        if save_path:
+            try:
+                with open(save_path, "w", encoding="utf-8") as f:
+                    for r in self.accepted_records:
+                        f.write(f">{r['id']} source:{r['source']} len:{r['length']}\n")
+                        for i in range(0, r["length"], 80):
+                            f.write(r["sequence"][i:i + 80] + "\n")
+
+                QMessageBox.information(self, "Sukces", f"Zapisano poprawnie {len(self.accepted_records)} sekwencji!")
+            except Exception as e:
+                QMessageBox.critical(self, "Błąd zapisu", str(e))
+
+
+# ==========================================
+# 4. URUCHOMIENIE APLIKACJI
+# ==========================================
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+
+    # Ustawienie ładniejszego stylu okien (dostępne na Windows/Mac)
+    app.setStyle("Fusion")
+
+    window = PhageQCApp()
+    window.show()
+    sys.exit(app.exec())
