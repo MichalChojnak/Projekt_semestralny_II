@@ -1,167 +1,130 @@
-from __future__ import annotations
-import csv
-from pathlib import Path
-from Bio import SeqIO  # Wymaga instalacji: pip install biopython
+import streamlit as st
+from Bio import SeqIO
+import pandas as pd
+import io
 
 
-# --- FUNKCJE POMOCNICZE ---
+# --- FUNKCJE POMOCNICZE I OBLICZENIA BIOLOGICZNE ---
 
 def n_content(seq: str) -> float:
-    """Zwraca ułamek występowania nukleotydu 'N' w sekwencji."""
-    if not seq:
-        return 0.0
-    return seq.count('N') / len(seq)
+    return seq.count('N') / len(seq) if len(seq) > 0 else 0
 
 
-def parse_and_clean_file(file_path: Path) -> list[dict]:
-    """
-    Rozpoznaje format pliku, parsuje go za pomocą Biopython,
-    usuwa przerwy (gapy) i konwertuje na listę słowników.
-    """
+def gc_content(seq: str) -> float:
+    seq_upper = seq.upper()
+    g = seq_upper.count('G')
+    c = seq_upper.count('C')
+    return ((g + c) / len(seq_upper) * 100) if len(seq_upper) > 0 else 0
+
+
+def process_uploaded_file(uploaded_file) -> list[dict]:
+    """Wczytuje plik z przeglądarki (w pamięci) i parsuje go przez Biopython."""
     records = []
-    # Automatyczne wykrywanie formatu na podstawie rozszerzenia
-    ext = file_path.suffix.lower()
-    if ext in [".fasta", ".fa", ".fna"]:
-        fmt = "fasta"
-    elif ext in [".fastq", ".fq"]:
-        fmt = "fastq"
-    elif ext in [".gbk", ".gb"]:
-        fmt = "genbank"
-    else:
-        print(f"Pominięto plik {file_path.name}: nieznany format.")
-        return records
+    # Streamlit zwraca plik jako bajty, musimy go zdekodować do tekstu dla Biopythona
+    stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
 
-    try:
-        for record in SeqIO.parse(file_path, fmt):
-            # Normalizacja: wielkie litery i usunięcie przerw (gapów)
-            clean_seq = str(record.seq).upper().replace("-", "")
-            records.append({
-                "id": record.id,
-                "description": record.description,
-                "sequence": clean_seq,
-                "source_file": file_path.name
-            })
-    except Exception as e:
-        print(f"Błąd podczas czytania pliku {file_path.name}: {e}")
+    # Próba zgadnięcia formatu (fasta lub fastq)
+    fmt = "fasta" if uploaded_file.name.lower().endswith((".fasta", ".fa", ".fna")) else "fastq"
 
+    for record in SeqIO.parse(stringio, fmt):
+        clean_seq = str(record.seq).upper().replace("-", "")
+        records.append({
+            "id": record.id,
+            "length": len(clean_seq),
+            "gc_pct": gc_content(clean_seq),
+            "n_pct": n_content(clean_seq),
+            "sequence": clean_seq,
+            "source": uploaded_file.name
+        })
     return records
 
 
-# --- GŁÓWNA LOGIKA FILTROWANIA (Z TWOICH ZAJĘĆ, ROZBUDOWANA) ---
+# --- INTERFEJS UŻYTKOWNIKA (GUI) ---
 
-def filter_sequences(records: list[dict], min_len: int, max_n_pct: float) -> tuple[list[dict], list[dict]]:
-    """
-    Filtruje sekwencje według parametrów jakości oraz poprawności alfabetu.
-    Zwraca: (accepted, rejected)
-    """
-    accepted, rejected = [], []
-    allowed_chars = set("ACGTN")
+# 1. Ustawienia strony
+st.set_page_config(page_title="Phage Host Predictor - QC", page_icon="🧬", layout="wide")
+st.title("🧬 Moduł Walidacji Danych Sekwencyjnych")
+st.markdown("Wgraj pliki FASTA/FASTQ, aby sprawdzić ich jakość przed uruchomieniem predykcji gospodarza.")
 
-    for r in records:
-        seq = r["sequence"]
-        reject = False
-        reason = ""
+# 2. Pasek boczny z parametrami filtrowania
+st.sidebar.header("Parametry Filtrowania")
+min_len = st.sidebar.number_input("Minimalna długość sekwencji (bp)", min_value=1, value=5000, step=100)
+max_n_pct = st.sidebar.slider("Maksymalna zawartość 'N' (%)", min_value=0.0, max_value=100.0, value=5.0) / 100.0
 
-        # 1. Sprawdzenie niedozwolonych znaków (tylko A, T, G, C, N są dozwolone)
-        invalid_chars = set(seq) - allowed_chars
+# 3. Pole do wgrywania plików
+uploaded_files = st.file_uploader("Przeciągnij i upuść pliki sekwencji", accept_multiple_files=True,
+                                  type=['fasta', 'fa', 'fna', 'fastq', 'fq'])
 
-        if invalid_chars:
-            reject = True
-            reason = f"INVALID_ALPHABET (znaleziono: {', '.join(invalid_chars)})"
-        # 2. Sprawdzenie długości minimalnej
-        elif len(seq) < min_len:
-            reject = True
-            reason = f"TOO_SHORT (len={len(seq)}, min={min_len})"
-        # 3. Sprawdzenie zawartości N
-        elif n_content(seq) > max_n_pct:
-            reject = True
-            reason = f"HIGH_N (n_pct={n_content(seq):.0%}, max={max_n_pct:.0%})"
-
-        if reject:
-            rejected.append({**r, "reason": reason})
-        else:
-            accepted.append(r)
-
-    return accepted, rejected
-
-
-# --- ZAPIS WYNIKÓW ---
-
-def save_to_fasta(records: list[dict], out_path: Path) -> None:
-    """Zapisuje przefiltrowane słowniki do zunifikowanego pliku FASTA."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        for r in records:
-            f.write(f">{r['id']} {r['description']} | source:{r['source_file']}\n")
-            # Łamanie długich sekwencji na linie po 80 znaków (standard FASTA)
-            seq = r["sequence"]
-            for i in range(0, len(seq), 80):
-                f.write(seq[i:i + 80] + "\n")
-
-
-def save_param_compare(results_by_variant: dict, out_path: Path) -> None:
-    """Zapisuje tabelę porównawczą wyników dla obu wariantów z zajęć."""
-    if not results_by_variant:
-        return
-
-    rows = []
-    for variant, data in results_by_variant.items():
-        rows.append({
-            "variant": variant,
-            "min_len": data["params"]["min_len"],
-            "max_n_pct": data["params"]["max_n_pct"],
-            "total_input": data["total"],
-            "accepted": data["accepted"],
-            "rejected": data["rejected"],
-            "accepted_pct": round(data["accepted"] / data["total"] * 100, 1) if data["total"] else 0,
-        })
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        w.writeheader()
-        w.writerows(rows)
-
-
-# --- URUCHOMIENIE PIPELINE'U ---
-
-def run_pipeline(input_dir: str, output_dir: str, min_len: int = 5000, max_n_pct: float = 0.05):
-    """Główna funkcja orkiestrująca działanie programu."""
-    in_path = Path(input_dir)
-    out_path = Path(output_dir)
+if uploaded_files:
+    st.info(f"Wczytano {len(uploaded_files)} plik(ów). Rozpoczynam analizę...")
 
     all_records = []
+    for f in uploaded_files:
+        all_records.extend(process_uploaded_file(f))
 
-    print(f"Skanowanie katalogu: {in_path}...")
-    for file_path in in_path.iterdir():
-        if file_path.is_file():
-            # Parsowanie i unifikacja do pamięci
-            all_records.extend(parse_and_clean_file(file_path))
+    if not all_records:
+        st.error("Nie udało się odczytać żadnych sekwencji z podanych plików.")
+    else:
+        # 4. Filtracja danych
+        accepted = []
+        rejected = []
+        allowed_chars = set("ACGTN")
 
-    print(f"Wczytano {len(all_records)} sekwencji. Rozpoczęcie filtracji...")
+        for r in all_records:
+            invalid_chars = set(r["sequence"]) - allowed_chars
+            if invalid_chars:
+                r["reject_reason"] = "Niedozwolone znaki"
+                rejected.append(r)
+            elif r["length"] < min_len:
+                r["reject_reason"] = "Zbyt krótka"
+                rejected.append(r)
+            elif r["n_pct"] > max_n_pct:
+                r["reject_reason"] = "Zbyt dużo przerw (N)"
+                rejected.append(r)
+            else:
+                accepted.append(r)
 
-    # Filtrowanie
-    accepted, rejected = filter_sequences(all_records, min_len, max_n_pct)
+        # 5. GENEROWANIE RAPORTU / DASHBOARDU
+        st.header("📊 Raport Jakości (QC)")
 
-    # Zapis zaakceptowanych do jednego pliku FASTA
-    final_fasta = out_path / "unified_valid_phages.fasta"
-    save_to_fasta(accepted, final_fasta)
-    print(f"Zapisano {len(accepted)} poprawnych sekwencji do {final_fasta}")
+        # Kolumny z głównymi metrykami (KPIs)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Wszystkie sekwencje", len(all_records))
+        col2.metric("Zaakceptowane", len(accepted))
+        col3.metric("Odrzucone", len(rejected))
 
-    # Generowanie raportu z Twojego fragmentu
-    results_dict = {
-        "variant_1": {
-            "params": {"min_len": min_len, "max_n_pct": max_n_pct},
-            "total": len(all_records),
-            "accepted": len(accepted),
-            "rejected": len(rejected)
-        }
-    }
-    report_file = out_path / "qc_report.csv"
-    save_param_compare(results_dict, report_file)
-    print(f"Zapisano raport odrzutów do {report_file}")
+        if accepted:
+            df_accepted = pd.DataFrame(accepted)
+            avg_len = df_accepted["length"].mean()
+            avg_gc = df_accepted["gc_pct"].mean()
 
+            col4.metric("Średnia długość (zaakcept.)", f"{avg_len:,.0f} bp")
 
-# Jeśli uruchamiamy plik bezpośrednio:
-if __name__ == "__main__":
-    # Zakładając, że pliki wejściowe masz w folderze 'raw_data', a wyniki chcesz w 'processed_data'
-    run_pipeline(input_dir="raw_data", output_dir="processed_data", min_len=5000, max_n_pct=0.05)
+            st.subheader("Szczegóły zaakceptowanych sekwencji")
+            # Wyświetlamy ładną tabelę (bez samej sekwencji, żeby nie zamulić przeglądarki)
+            st.dataframe(df_accepted[["id", "length", "gc_pct", "n_pct", "source"]].style.format(
+                {"gc_pct": "{:.1f}%", "n_pct": "{:.2%}"}), use_container_width=True)
+
+        if rejected:
+            with st.expander("Pokaż odrzucone sekwencje i powody"):
+                df_rejected = pd.DataFrame(rejected)
+                st.dataframe(df_rejected[["id", "length", "reject_reason", "source"]], use_container_width=True)
+
+        # 6. Opcja pobrania połączonego i oczyszczonego pliku FASTA
+        if accepted:
+            st.success("✅ Walidacja zakończona. Możesz pobrać ujednolicony plik do dalszej analizy.")
+
+            # Generowanie zawartości pliku FASTA w pamięci
+            fasta_output = io.StringIO()
+            for r in accepted:
+                fasta_output.write(f">{r['id']} source:{r['source']} len:{r['length']}\n")
+                # Łamanie linii co 80 znaków
+                for i in range(0, r["length"], 80):
+                    fasta_output.write(r["sequence"][i:i + 80] + "\n")
+
+            st.download_button(
+                label="📥 Pobierz oczyszczony plik FASTA",
+                data=fasta_output.getvalue(),
+                file_name="zwalidowane_fagi.fasta",
+                mime="text/plain"
+            )
