@@ -139,9 +139,9 @@ class PhageQCApp(QMainWindow):
             "",
             "Pliki sekwencji (*.fasta *.fa *.fna *.fastq *.fq *.gbk);;Wszystkie pliki (*)"
         )
-
+        # Użytkownik anulował wybór
         if not files:
-            return  # Użytkownik anulował wybór
+            return
 
         all_records = []
         for file_path in files:
@@ -207,8 +207,6 @@ class PhageQCApp(QMainWindow):
         status_item = QTableWidgetItem(status_text)
         status_item.setForeground(color)
         self.table.setItem(row, 4, status_item)
-
-        # Tutaj wprowadzona poprawka z zamkniętym nawiasem
         self.table.setItem(row, 5, QTableWidgetItem(reason_text))
 
     def export_fasta(self):
@@ -233,15 +231,10 @@ class PhageQCApp(QMainWindow):
                 QMessageBox.critical(self, "Błąd zapisu", str(e))
 
 
-# ==========================================
 # 4. URUCHOMIENIE APLIKACJI
-# ==========================================
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-
-    # Ustawienie ładniejszego stylu okien (dostępne na Windows/Mac)
     app.setStyle("Fusion")
-
     window = PhageQCApp()
     window.show()
     sys.exit(app.exec())
