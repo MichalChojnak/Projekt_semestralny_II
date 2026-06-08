@@ -316,10 +316,9 @@ class PhageQCApp(QMainWindow):
             self.heatmap_canvas.draw()
             return
 
-        # Pokaż WSZYSTKIE rekordy (usunięto subset = records[:15])
         subset = records
 
-        # Dynamiczna wysokość wykresu na podstawie ilości elementów (zapobiega nachodzeniu na siebie)
+        # Dynamiczna wysokość wykresu
         fig_height = max(4.0, len(subset) * 0.25)
         self.heatmap_fig.set_size_inches(4.0, fig_height)
 
@@ -328,34 +327,45 @@ class PhageQCApp(QMainWindow):
         gc_vals = [r["gc_pct"] for r in subset]
         n_vals = [r["n_pct"] * 100 for r in subset]
         qs_vals = [r["quality_score"] for r in subset]
+        len_vals = [r["length"] for r in subset]  # Dodano Długość
 
-        data_matrix = np.array([gc_vals, n_vals, qs_vals]).T
+        data_matrix = np.array([gc_vals, n_vals, qs_vals, len_vals]).T
 
-        cax = ax.imshow(data_matrix, cmap='YlGnBu', aspect='auto')
+        # Normalizacja kolumn (aby duża wartość długości nie zepsuła kolorów %GC czy %N)
+        color_matrix = np.zeros_like(data_matrix, dtype=float)
+        for j in range(4):
+            cmax = data_matrix[:, j].max()
+            color_matrix[:, j] = data_matrix[:, j] / cmax if cmax > 0 else 0
+
+        cax = ax.imshow(color_matrix, cmap='YlGnBu', aspect='auto')
         ax.set_yticks(np.arange(len(labels)))
         ax.set_yticklabels(labels, fontsize=8)
-        ax.set_xticks(np.arange(3))
-        ax.set_xticklabels(['% GC', '% N', 'Quality Score'], fontsize=9)
 
-        # Wyliczenie wartości progowej, od której tekst zmienia się na biały (dla czytelności na ciemnym tle)
-        threshold = data_matrix.max() * 0.65
+        # Oś X przeniesiona na górę
+        ax.set_xticks(np.arange(4))
+        ax.set_xticklabels(['% GC', '% N', 'Quality Score', 'Długość'], fontsize=9)
+        ax.xaxis.tick_top()
 
         font_size = 8 if len(subset) < 40 else 6
 
+        # Rysowanie tekstu z prawdziwymi wartościami na znormalizowanym kolorze
         for i in range(len(labels)):
-            for j in range(3):
+            for j in range(4):
                 val = data_matrix[i, j]
-                text_color = 'white' if val > threshold else 'black'
+                norm_val = color_matrix[i, j]
+                text_color = 'white' if norm_val > 0.65 else 'black'
 
-                ax.text(j, i, f"{val:.1f}", ha='center', va='center',
+                # Formatowanie (dla długości liczba całkowita, reszta ułamki)
+                text_str = f"{int(val)}" if j == 3 else f"{val:.1f}"
+
+                ax.text(j, i, text_str, ha='center', va='center',
                         color=text_color, fontsize=font_size, weight='bold')
 
-        self.heatmap_fig.colorbar(cax, ax=ax, orientation='horizontal', pad=0.05)
-        ax.set_title("Profil Parametrów QC\n", fontsize=10, fontweight='bold')
+        # Usunięto colorbar, aby zrobić więcej miejsca dla 4 kolumn
+        ax.set_title("Profil Parametrów QC\n\n", fontsize=10, fontweight='bold')
         self.heatmap_fig.tight_layout()
         self.heatmap_canvas.draw()
 
-        # Aktualizacja minimalnego rozmiaru canvasu w przewijanym oknie
         self.heatmap_canvas.setMinimumSize(400, int(fig_height * 100))
 
     def export_excel(self):
@@ -460,26 +470,36 @@ class PhageQCApp(QMainWindow):
                 ax_text.text(0.05, 0.3, summary_txt, fontsize=11, family='monospace',
                              bbox=dict(facecolor='#F8F9F9', alpha=0.9, boxstyle='round,pad=1', edgecolor='#BDC3C7'))
 
-                # W PDF zostawiamy top 25 (ze wzgledu na format A4 papieru)
                 subset = all_data[:25]
                 labels = [r["id"][:12] for r in subset]
-                matrix = np.array([[r["gc_pct"], r["n_pct"] * 100, r["quality_score"]] for r in subset])
+                # Dodano długość do macierzy danych PDF
+                data_matrix = np.array(
+                    [[r["gc_pct"], r["n_pct"] * 100, r["quality_score"], r["length"]] for r in subset])
 
-                cax = ax_chart.imshow(matrix, cmap='YlGnBu', aspect='auto')
+                # Normalizacja, by kolory były spójne
+                color_matrix = np.zeros_like(data_matrix, dtype=float)
+                for j in range(4):
+                    cmax = data_matrix[:, j].max()
+                    color_matrix[:, j] = data_matrix[:, j] / cmax if cmax > 0 else 0
+
+                cax = ax_chart.imshow(color_matrix, cmap='YlGnBu', aspect='auto')
                 ax_chart.set_yticks(np.arange(len(labels)))
                 ax_chart.set_yticklabels(labels, fontsize=8)
-                ax_chart.set_xticks(np.arange(3))
-                ax_chart.set_xticklabels(['% GC', '% N', 'Quality Score'], fontsize=10)
 
-                threshold = matrix.max() * 0.65
+                # Oś X przeniesiona na górę w pliku PDF
+                ax_chart.set_xticks(np.arange(4))
+                ax_chart.set_xticklabels(['% GC', '% N', 'Quality Score', 'Długość'], fontsize=10)
+                ax_chart.xaxis.tick_top()
+
                 for i in range(len(labels)):
-                    for j in range(3):
-                        val = matrix[i, j]
-                        text_color = 'white' if val > threshold else 'black'
-                        ax_chart.text(j, i, f"{val:.1f}", ha='center', va='center', color=text_color, fontsize=8)
+                    for j in range(4):
+                        val = data_matrix[i, j]
+                        norm_val = color_matrix[i, j]
+                        text_color = 'white' if norm_val > 0.65 else 'black'
+                        text_str = f"{int(val)}" if j == 3 else f"{val:.1f}"
+                        ax_chart.text(j, i, text_str, ha='center', va='center', color=text_color, fontsize=8)
 
-                fig.colorbar(cax, ax=ax_chart, orientation='horizontal', label='Wartości liczbowe')
-                ax_chart.set_title("Heatmapa profili jakości (Top 25 próbek)\n", fontsize=11, fontweight='bold')
+                ax_chart.set_title("Heatmapa profili jakości (Top 25 próbek)\n\n", fontsize=11, fontweight='bold')
 
                 plt.tight_layout()
                 pdf.savefig(fig)
