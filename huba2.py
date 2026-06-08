@@ -7,16 +7,19 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt
 from Bio import SeqIO
 
+
 # 1. HUBA
 # zawartość %N
 def n_content(seq: str) -> float:
     return seq.count('N') / len(seq) if len(seq) > 0 else 0.0
+
 
 # zawartość %GC
 def gc_content(seq: str) -> float:
     seq_upper = seq.upper()
     g, c = seq_upper.count('G'), seq_upper.count('C')
     return ((g + c) / len(seq_upper)) * 100 if len(seq_upper) > 0 else 0.0
+
 
 # wczytywanie pliku
 def process_file(file_path: str) -> list[dict]:
@@ -57,6 +60,7 @@ class PhageQCApp(QMainWindow):
         self.resize(900, 600)
 
         # Zmienne do przechowywania wyników
+        self.raw_records = []
         self.accepted_records = []
         self.rejected_records = []
 
@@ -96,8 +100,14 @@ class PhageQCApp(QMainWindow):
         self.btn_load.clicked.connect(self.load_files)
         actions_layout.addWidget(self.btn_load)
 
+        # DODANY PRZYCISK ANALIZY
+        self.btn_run = QPushButton("Analizuj (Run QC)")
+        self.btn_run.setEnabled(False)
+        self.btn_run.clicked.connect(self.run_qc)
+        actions_layout.addWidget(self.btn_run)
+
         self.btn_export = QPushButton("Eksportuj poprawne (FASTA)")
-        self.btn_export.setEnabled(False)  # Zablokowany, dopóki nie ma danych
+        self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self.export_fasta)
         actions_layout.addWidget(self.btn_export)
 
@@ -112,14 +122,13 @@ class PhageQCApp(QMainWindow):
         self.lbl_accepted = QLabel("Zaakceptowane: 0")
         self.lbl_rejected = QLabel("Odrzucone: 0")
 
-        # Dodanie prostego stylowania (kolory)
         self.lbl_accepted.setStyleSheet("color: green; font-weight: bold;")
         self.lbl_rejected.setStyleSheet("color: red; font-weight: bold;")
 
         stats_layout.addWidget(self.lbl_total)
         stats_layout.addWidget(self.lbl_accepted)
         stats_layout.addWidget(self.lbl_rejected)
-        stats_layout.addStretch()  # Wypycha statystyki na lewo
+        stats_layout.addStretch()
         main_layout.addLayout(stats_layout)
 
         # --- PANEL DOLNY (Tabela wyników) ---
@@ -132,26 +141,31 @@ class PhageQCApp(QMainWindow):
     # 3. AKCJE (Obsługa przycisków)
 
     def load_files(self):
-        # Otwarcie okna wyboru plików
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Wybierz pliki sekwencji",
             "",
             "Pliki sekwencji (*.fasta *.fa *.fna *.fastq *.fq *.gbk);;Wszystkie pliki (*)"
         )
-        # Użytkownik anulował wybór
         if not files:
             return
 
-        all_records = []
+        self.raw_records = []
         for file_path in files:
-            all_records.extend(process_file(file_path))
+            self.raw_records.extend(process_file(file_path))
 
-        if not all_records:
-            QMessageBox.warning(self, "Błąd", "Nie znaleziono poprawnych sekwencji w wybranych plikach.")
+        if not self.raw_records:
+            QMessageBox.warning(self, "Błąd", "Nie znaleziono poprawnych sekwencji.")
+            self.btn_run.setEnabled(False)
             return
 
-        self.filter_and_display(all_records)
+        self.btn_run.setEnabled(True)
+        QMessageBox.information(self, "Wczytano",
+                                f"Wczytano {len(self.raw_records)} sekwencji. Kliknij 'Analizuj', aby wykonać QC.")
+
+    def run_qc(self):
+        """Dodatkowa funkcja do uruchamiania filtrowania ręcznie."""
+        self.filter_and_display(self.raw_records)
 
     def filter_and_display(self, all_records):
         self.accepted_records = []
@@ -161,7 +175,6 @@ class PhageQCApp(QMainWindow):
         min_len = self.min_len_spin.value()
         max_n_pct = self.max_n_spin.value() / 100.0
 
-        # Filtrowanie
         for r in all_records:
             invalid_chars = set(r["sequence"]) - allowed_chars
             if invalid_chars:
@@ -176,15 +189,11 @@ class PhageQCApp(QMainWindow):
             else:
                 self.accepted_records.append(r)
 
-        # Aktualizacja etykiet
         self.lbl_total.setText(f"Wszystkie: {len(all_records)}")
         self.lbl_accepted.setText(f"Zaakceptowane: {len(self.accepted_records)}")
         self.lbl_rejected.setText(f"Odrzucone: {len(self.rejected_records)}")
 
-        # Wypełnianie tabeli
         self.table.setRowCount(len(all_records))
-
-        # Najpierw wrzucamy zaakceptowane, potem odrzucone
         row = 0
         for r in self.accepted_records:
             self._add_table_row(row, r, "Zaakceptowano", r["source"], Qt.GlobalColor.darkGreen)
@@ -194,11 +203,9 @@ class PhageQCApp(QMainWindow):
             self._add_table_row(row, r, "Odrzucono", r["reject_reason"], Qt.GlobalColor.red)
             row += 1
 
-        # Odblokowanie przycisku eksportu, jeśli mamy co eksportować
         self.btn_export.setEnabled(len(self.accepted_records) > 0)
 
     def _add_table_row(self, row, record, status_text, reason_text, color):
-        """Funkcja pomocnicza do wprowadzania danych do komórek tabeli."""
         self.table.setItem(row, 0, QTableWidgetItem(record["id"]))
         self.table.setItem(row, 1, QTableWidgetItem(str(record["length"])))
         self.table.setItem(row, 2, QTableWidgetItem(f"{record['gc_pct']:.2f}"))
@@ -210,7 +217,6 @@ class PhageQCApp(QMainWindow):
         self.table.setItem(row, 5, QTableWidgetItem(reason_text))
 
     def export_fasta(self):
-        # Okno zapisu pliku
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Zapisz oczyszczony plik FASTA",
@@ -231,7 +237,6 @@ class PhageQCApp(QMainWindow):
                 QMessageBox.critical(self, "Błąd zapisu", str(e))
 
 
-# 4. URUCHOMIENIE APLIKACJI
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
