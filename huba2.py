@@ -7,25 +7,19 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt
 from Bio import SeqIO
 
-
-# ==========================================
-# 1. LOGIKA BIOLOGICZNA
-# ==========================================
-
+# 1. HUBA
+# zawartość %N
 def n_content(seq: str) -> float:
-    """Zwraca ułamek występowania nukleotydu 'N' w sekwencji."""
     return seq.count('N') / len(seq) if len(seq) > 0 else 0.0
 
-
+# zawartość %GC
 def gc_content(seq: str) -> float:
-    """Zwraca zawartość procentową par GC."""
     seq_upper = seq.upper()
     g, c = seq_upper.count('G'), seq_upper.count('C')
     return ((g + c) / len(seq_upper)) * 100 if len(seq_upper) > 0 else 0.0
 
-
+# wczytywanie pliku
 def process_file(file_path: str) -> list[dict]:
-    """Wczytuje i parsuje plik bezpośrednio z dysku."""
     records = []
     ext = file_path.lower()
 
@@ -54,9 +48,7 @@ def process_file(file_path: str) -> list[dict]:
     return records
 
 
-# ==========================================
 # 2. INTERFEJS UŻYTKOWNIKA (PyQt6)
-# ==========================================
 
 class PhageQCApp(QMainWindow):
     def __init__(self):
@@ -137,9 +129,7 @@ class PhageQCApp(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         main_layout.addWidget(self.table)
 
-    # ==========================================
     # 3. AKCJE (Obsługa przycisków)
-    # ==========================================
 
     def load_files(self):
         # Otwarcie okna wyboru plików
