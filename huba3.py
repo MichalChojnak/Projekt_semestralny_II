@@ -3,7 +3,8 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QSpinBox,
                              QDoubleSpinBox, QFileDialog, QTableWidget,
-                             QTableWidgetItem, QMessageBox, QHeaderView, QGroupBox)
+                             QTableWidgetItem, QMessageBox, QHeaderView, QGroupBox,
+                             QScrollArea)
 from PyQt6.QtCore import Qt
 from Bio import SeqIO
 
@@ -61,8 +62,8 @@ def process_file(file_path: str) -> list[dict]:
 class PhageQCApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🧬 Phage Host Predictor - Moduł QC + Raportowanie")
-        self.resize(1150, 650)
+        self.setWindowTitle("Phage Host Predictor - Moduł QC + Raportowanie")
+        self.resize(1200, 750)
 
         # Zmienne do przechowywania wyników
         self.raw_records = []
@@ -78,7 +79,7 @@ class PhageQCApp(QMainWindow):
         top_panel = QHBoxLayout()
 
         # Grupa: Parametry
-        params_group = QGroupBox("⚙️ Parametry Filtrowania")
+        params_group = QGroupBox("Parametry Filtrowania")
         params_layout = QHBoxLayout()
 
         params_layout.addWidget(QLabel("Min. długość (bp):"))
@@ -98,7 +99,7 @@ class PhageQCApp(QMainWindow):
         top_panel.addWidget(params_group)
 
         # Grupa: Akcje i Eksport
-        actions_group = QGroupBox("📂 Akcje i Raporty")
+        actions_group = QGroupBox("Akcje i Raporty")
         actions_layout = QHBoxLayout()
 
         self.btn_load = QPushButton("Wgraj pliki...")
@@ -145,9 +146,10 @@ class PhageQCApp(QMainWindow):
         stats_layout.addStretch()
         main_layout.addLayout(stats_layout)
 
-        # --- PANEL DOLNY (Tabela wyników + Wykres z boku) ---
+        # --- PANEL DOLNY (Tabela wyników + Wykresy z boku) ---
         bottom_layout = QHBoxLayout()
 
+        # Lewa strona - Tabela
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
@@ -155,14 +157,27 @@ class PhageQCApp(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         bottom_layout.addWidget(self.table, stretch=2)
 
-        # NOWY ELEMENT UI: Wbudowane okno wykresu Matplotlib (Heatmapa)
-        self.fig = Figure(figsize=(5, 4), dpi=100)
-        self.canvas = FigureCanvas(self.fig)
-        bottom_layout.addWidget(self.canvas, stretch=1)
+        # Prawa strona - Wykresy
+        charts_layout = QVBoxLayout()
 
+        # Wykres 1: Wykres Kołowy (Akceptowane vs Odrzucone)
+        self.pie_fig = Figure(figsize=(4, 3), dpi=100)
+        self.pie_canvas = FigureCanvas(self.pie_fig)
+        charts_layout.addWidget(self.pie_canvas, stretch=1)
+
+        # Wykres 2: Heatmapa w obszarze przewijanym (żeby obsłużyć wszystkie wyniki)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.heatmap_fig = Figure(figsize=(4, 4), dpi=100)
+        self.heatmap_canvas = FigureCanvas(self.heatmap_fig)
+        self.scroll_area.setWidget(self.heatmap_canvas)
+        charts_layout.addWidget(self.scroll_area, stretch=2)
+
+        bottom_layout.addLayout(charts_layout, stretch=1)
         main_layout.addLayout(bottom_layout)
 
-        # Pierwsze rysowanie pustego wykresu startowego
+        # Pierwsze rysowanie pustych wykresów startowych
+        self.update_pie_chart(0, 0)
         self.update_heatmap([])
 
     # 3. AKCJE (Obsługa przycisków)
@@ -244,7 +259,8 @@ class PhageQCApp(QMainWindow):
             self._add_table_row(row, r, "Odrzucono", r["reject_reason"], Qt.GlobalColor.red)
             row += 1
 
-        # Aktualizacja Heatmapy
+        # Aktualizacja wykresów
+        self.update_pie_chart(len(self.accepted_records), len(self.rejected_records))
         self.update_heatmap(all_records)
 
         # Aktywacja przycisków eksportu
@@ -264,18 +280,49 @@ class PhageQCApp(QMainWindow):
         self.table.setItem(row, 5, status_item)
         self.table.setItem(row, 6, QTableWidgetItem(reason_text))
 
+    def update_pie_chart(self, accepted, rejected):
+        self.pie_fig.clear()
+        ax = self.pie_fig.add_subplot(111)
+
+        if accepted == 0 and rejected == 0:
+            ax.text(0.5, 0.5, "Brak danych.\nWgraj pliki.", ha='center', va='center', color='gray')
+            ax.axis('off')
+        else:
+            labels_raw = ['Zaakceptowane', 'Odrzucone']
+            sizes_raw = [accepted, rejected]
+            colors_raw = ['#2ecc71', '#e74c3c']
+            explode_raw = [0.1, 0]
+
+            # Filtrowanie zerowych wartości, by wykres się nie psuł
+            labels = [l for l, s in zip(labels_raw, sizes_raw) if s > 0]
+            sizes = [s for s in sizes_raw if s > 0]
+            colors = [c for c, s in zip(colors_raw, sizes_raw) if s > 0]
+            explode = [e for e, s in zip(explode_raw, sizes_raw) if s > 0]
+
+            ax.pie(sizes, explode=explode, labels=labels, colors=colors,
+                   autopct='%1.1f%%', shadow=True, startangle=140, textprops={'fontsize': 9})
+            ax.set_title("Podsumowanie Filtracji\n", fontsize=10, fontweight='bold')
+
+        self.pie_fig.tight_layout()
+        self.pie_canvas.draw()
+
     def update_heatmap(self, records):
-        self.fig.clear()
-        ax = self.fig.add_subplot(111)
+        self.heatmap_fig.clear()
+        ax = self.heatmap_fig.add_subplot(111)
 
         if not records:
-            ax.text(0.5, 0.5, "Brak danych.\nWgraj pliki i kliknij\n'Analizuj (Run QC)'",
-                    ha='center', va='center', fontsize=10, color='gray')
+            ax.text(0.5, 0.5, "Brak danych heatmapy.", ha='center', va='center', fontsize=10, color='gray')
             ax.axis('off')
-            self.canvas.draw()
+            self.heatmap_canvas.draw()
             return
 
-        subset = records[:15]
+        # Pokaż WSZYSTKIE rekordy (usunięto subset = records[:15])
+        subset = records
+
+        # Dynamiczna wysokość wykresu na podstawie ilości elementów (zapobiega nachodzeniu na siebie)
+        fig_height = max(4.0, len(subset) * 0.25)
+        self.heatmap_fig.set_size_inches(4.0, fig_height)
+
         labels = [r["id"][:12] for r in subset]
 
         gc_vals = [r["gc_pct"] for r in subset]
@@ -290,15 +337,26 @@ class PhageQCApp(QMainWindow):
         ax.set_xticks(np.arange(3))
         ax.set_xticklabels(['% GC', '% N', 'Quality Score'], fontsize=9)
 
+        # Wyliczenie wartości progowej, od której tekst zmienia się na biały (dla czytelności na ciemnym tle)
+        threshold = data_matrix.max() * 0.65
+
+        font_size = 8 if len(subset) < 40 else 6
+
         for i in range(len(labels)):
             for j in range(3):
-                ax.text(j, i, f"{data_matrix[i, j]:.1f}", ha='center', va='center',
-                        color='black', fontsize=8, weight='bold')
+                val = data_matrix[i, j]
+                text_color = 'white' if val > threshold else 'black'
 
-        self.fig.colorbar(cax, ax=ax, orientation='horizontal', pad=0.12)
-        ax.set_title("🔬 Profil Parametrów QC (Top 15)", fontsize=10, fontweight='bold')
-        self.fig.tight_layout()
-        self.canvas.draw()
+                ax.text(j, i, f"{val:.1f}", ha='center', va='center',
+                        color=text_color, fontsize=font_size, weight='bold')
+
+        self.heatmap_fig.colorbar(cax, ax=ax, orientation='horizontal', pad=0.05)
+        ax.set_title("Profil Parametrów QC\n", fontsize=10, fontweight='bold')
+        self.heatmap_fig.tight_layout()
+        self.heatmap_canvas.draw()
+
+        # Aktualizacja minimalnego rozmiaru canvasu w przewijanym oknie
+        self.heatmap_canvas.setMinimumSize(400, int(fig_height * 100))
 
     def export_excel(self):
         all_data = self.accepted_records + self.rejected_records
@@ -381,13 +439,13 @@ class PhageQCApp(QMainWindow):
 
             with PdfPages(save_path) as pdf:
                 fig, (ax_text, ax_chart) = plt.subplots(2, 1, figsize=(8.5, 11))
-                fig.suptitle("🧬 Raport Kontroli Jakości Sekwencji (Phage QC)", fontsize=16, fontweight='bold',
-                             color='#2C3E50', pad=15)
+
+                fig.suptitle("Raport Kontroli Jakości Sekwencji (Phage QC)\n", fontsize=16, fontweight='bold',
+                             color='#2C3E50')
 
                 ax_text.axis('off')
                 total_cnt = len(all_data)
 
-                # Zabezpieczenie przed dzieleniem przez zero
                 perc_acc = (len(self.accepted_records) / total_cnt * 100) if total_cnt > 0 else 0
                 perc_rej = (len(self.rejected_records) / total_cnt * 100) if total_cnt > 0 else 0
 
@@ -402,7 +460,8 @@ class PhageQCApp(QMainWindow):
                 ax_text.text(0.05, 0.3, summary_txt, fontsize=11, family='monospace',
                              bbox=dict(facecolor='#F8F9F9', alpha=0.9, boxstyle='round,pad=1', edgecolor='#BDC3C7'))
 
-                subset = all_data[:15]
+                # W PDF zostawiamy top 25 (ze wzgledu na format A4 papieru)
+                subset = all_data[:25]
                 labels = [r["id"][:12] for r in subset]
                 matrix = np.array([[r["gc_pct"], r["n_pct"] * 100, r["quality_score"]] for r in subset])
 
@@ -412,12 +471,15 @@ class PhageQCApp(QMainWindow):
                 ax_chart.set_xticks(np.arange(3))
                 ax_chart.set_xticklabels(['% GC', '% N', 'Quality Score'], fontsize=10)
 
+                threshold = matrix.max() * 0.65
                 for i in range(len(labels)):
                     for j in range(3):
-                        ax_chart.text(j, i, f"{matrix[i, j]:.1f}", ha='center', va='center', color='black', fontsize=8)
+                        val = matrix[i, j]
+                        text_color = 'white' if val > threshold else 'black'
+                        ax_chart.text(j, i, f"{val:.1f}", ha='center', va='center', color=text_color, fontsize=8)
 
-                fig.colorbar(cax, ax=ax_chart, orientation='horizontal', pad=0.15, label='Wartości liczbowe')
-                ax_chart.set_title("Heatmapa profili jakości (Top 15 próbek)", fontsize=11, fontweight='bold')
+                fig.colorbar(cax, ax=ax_chart, orientation='horizontal', label='Wartości liczbowe')
+                ax_chart.set_title("Heatmapa profili jakości (Top 25 próbek)\n", fontsize=11, fontweight='bold')
 
                 plt.tight_layout()
                 pdf.savefig(fig)
@@ -451,8 +513,8 @@ class PhageQCApp(QMainWindow):
                         cell.set_text_props(weight='bold', color='white')
                         cell.set_facecolor('#2C3E50')
 
-                    ax.set_title(f"Tabela Szczegółowa Wyników Analizy QC (Pozycje {i + 1} - {i + len(chunk)})",
-                                 fontsize=11, fontweight='bold', pad=15)
+                    ax.set_title(f"Tabela Szczegółowa Wyników Analizy QC (Pozycje {i + 1} - {i + len(chunk)})\n",
+                                 fontsize=11, fontweight='bold')
                     pdf.savefig(fig)
                     plt.close(fig)
 
