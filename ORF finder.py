@@ -7,8 +7,7 @@ from fpdf import FPDF, XPos, YPos
 from pathlib import Path
 import re
 
-
-# --- 1. SILNIK BIOINFORMATYCZNY (Szukanie ORF) ---
+# Szukanie ORF
 
 def find_orfs_in_record(seq_record, min_aa_length):
     """Skanuje rekord FASTA w 6 ramkach odczytu (+ i -)."""
@@ -55,7 +54,7 @@ def find_orfs_in_record(seq_record, min_aa_length):
     return sorted(orfs, key=lambda x: x["Start"])
 
 
-# --- 2. FUNKCJE GENERUJĄCE ---
+# FUNKCJE GENERUJĄCE
 
 def generate_excel(orfs, output_path):
     df = pd.DataFrame(orfs)
@@ -87,7 +86,7 @@ def generate_pdf(orfs, output_path, min_len):
     pdf.output(output_path)
 
 
-# --- 3. LOGIKA INTEGRACJI GUI ---
+# GUI
 
 def get_analyzed_orfs():
     """Wspólna funkcja pomocnicza walidująca wejście i uruchamiająca analizę."""
@@ -165,7 +164,7 @@ def export_to_pdf():
         messagebox.showinfo("Sukces", f"Raport PDF został pomyślnie zapisany w:\n{save_path}")
 
 
-# --- 4. BUDOWA NOWEGO INTERFEJSU UŻYTKOWNIKA ---
+# INTERFEJS
 
 root = tk.Tk()
 root.title("Phage ORF Explorer Pro")
