@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="778c7823-cb5b-49cf-9727-9ec01ae5bb91" name="Changes" comment="Annotator 2">
+      <change afterPath="$PROJECT_DIR$/.idea/Projekt_semestralny_II.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/annotation_page.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/home_page.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/host_page.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/main_window.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/orf_page.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/qc_page.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/gui/reports_page.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;MichalChojnak&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/MichalChojnak/Projekt_semestralny_II.git&quot;,
+    &quot;accountId&quot;: &quot;82e69033-0b8e-4367-9c00-652fffd55fcb&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 2,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3EUjVLWlASdC9lBLHAr5qBcBFW3" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.Annotator 2.executor": "Run",
+    "Python.Annotator.executor": "Run",
+    "Python.ORF finder.executor": "Run",
+    "Python.huba.executor": "Run",
+    "Python.huba2.executor": "Run",
+    "Python.huba3.executor": "Run",
+    "Python.huba4.executor": "Run",
+    "Python.huba5.executor": "Run",
+    "Python.orf finder 2.executor": "Run",
+    "Python.orf finder 3.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "master",
+    "nodejs_package_manager_path": "npm"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-c59985aa861c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.24374.152" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="778c7823-cb5b-49cf-9727-9ec01ae5bb91" name="Changes" comment="" />
+      <created>1780240064325</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1780240064325</updated>
+    </task>
+    <task id="LOCAL-00001" summary="huba">
+      <option name="closed" value="true" />
+      <created>1780240162093</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1780240162093</updated>
+    </task>
+    <task id="LOCAL-00002" summary="huba">
+      <option name="closed" value="true" />
+      <created>1780812436173</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1780812436173</updated>
+    </task>
+    <task id="LOCAL-00003" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780812468821</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1780812468821</updated>
+    </task>
+    <task id="LOCAL-00004" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780813268908</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1780813268908</updated>
+    </task>
+    <task id="LOCAL-00005" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780813370728</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1780813370728</updated>
+    </task>
+    <task id="LOCAL-00006" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780815158777</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1780815158777</updated>
+    </task>
+    <task id="LOCAL-00007" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780815449221</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1780815449221</updated>
+    </task>
+    <task id="LOCAL-00008" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780815567382</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1780815567382</updated>
+    </task>
+    <task id="LOCAL-00009" summary="huba v1">
+      <option name="closed" value="true" />
+      <created>1780815794629</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1780815794629</updated>
+    </task>
+    <task id="LOCAL-00010" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780817421610</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1780817421610</updated>
+    </task>
+    <task id="LOCAL-00011" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780895591022</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1780895591022</updated>
+    </task>
+    <task id="LOCAL-00012" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780895651888</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1780895651888</updated>
+    </task>
+    <task id="LOCAL-00013" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780895969912</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1780895969912</updated>
+    </task>
+    <task id="LOCAL-00014" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780896808627</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1780896808627</updated>
+    </task>
+    <task id="LOCAL-00015" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780901215464</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1780901215464</updated>
+    </task>
+    <task id="LOCAL-00016" summary="huba v2">
+      <option name="closed" value="true" />
+      <created>1780901477785</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1780901477785</updated>
+    </task>
+    <task id="LOCAL-00017" summary="huba v5">
+      <option name="closed" value="true" />
+      <created>1781022282525</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1781022282525</updated>
+    </task>
+    <task id="LOCAL-00018" summary="huba v5">
+      <option name="closed" value="true" />
+      <created>1781022291984</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1781022291984</updated>
+    </task>
+    <task id="LOCAL-00019" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1781540687046</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1781540687046</updated>
+    </task>
+    <task id="LOCAL-00020" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1781540760024</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1781540760024</updated>
+    </task>
+    <task id="LOCAL-00021" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1781540876045</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1781540876045</updated>
+    </task>
+    <task id="LOCAL-00022" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1781623185301</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1781623185301</updated>
+    </task>
+    <task id="LOCAL-00023" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1782887037974</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1782887037975</updated>
+    </task>
+    <task id="LOCAL-00024" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1782887744941</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1782887744941</updated>
+    </task>
+    <task id="LOCAL-00025" summary="orf finder v1">
+      <option name="closed" value="true" />
+      <created>1782888066706</created>
+      <option name="number" value="00025" />
+      <option name="presentableId" value="LOCAL-00025" />
+      <option name="project" value="LOCAL" />
+      <updated>1782888066706</updated>
+    </task>
+    <task id="LOCAL-00026" summary="Annotator 2">
+      <option name="closed" value="true" />
+      <created>1782888137322</created>
+      <option name="number" value="00026" />
+      <option name="presentableId" value="LOCAL-00026" />
+      <option name="project" value="LOCAL" />
+      <updated>1782888137322</updated>
+    </task>
+    <task id="LOCAL-00027" summary="Annotator 2">
+      <option name="closed" value="true" />
+      <created>1782893145627</created>
+      <option name="number" value="00027" />
+      <option name="presentableId" value="LOCAL-00027" />
+      <option name="project" value="LOCAL" />
+      <updated>1782893145627</updated>
+    </task>
+    <option name="localTasksCounter" value="28" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="huba" />
+    <MESSAGE value="huba v1" />
+    <MESSAGE value="huba v2" />
+    <MESSAGE value="huba v5" />
+    <MESSAGE value="orf finder v1" />
+    <MESSAGE value="Annotator 2" />
+    <option name="LAST_COMMIT_MESSAGE" value="Annotator 2" />
+  </component>
+</project>
