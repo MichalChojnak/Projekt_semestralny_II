@@ -91,7 +91,7 @@ class ORFFinderApp:
 
     def browse(self):
         file = filedialog.askopenfilename()
-        if file: self.entry_file.delete(0, tk.END); self.entry_file.insert(0, file)
+        if file: self5.entry_file.delete(0, tk.END); self.entry_file.insert(0, file)
 
     def run(self):
         try:
