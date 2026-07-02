@@ -1,7 +1,8 @@
 import streamlit as st
-import subprocess
 import pandas as pd
 import os
+import subprocess
+import re
 import io
 import matplotlib.pyplot as plt
 from Bio import SeqIO
@@ -9,67 +10,78 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from dna_features_viewer import GraphicFeature, GraphicRecord
 
-# Konfiguracja okna Streamlit
-st.set_page_config(page_title="Phage Hybrid Annotator", layout="wide")
-st.title("🧬 Phage Annotator PRO — Pipeline Hybrydowy (MMseqs2 + HMMER)")
+st.set_page_config(page_title="Local Windows Phage Annotator", layout="wide")
+st.title("🧬 Lokalny Pipeline Fagowy — 100% Windows (No Cloud)")
 st.write(
-    "Profesjonalne środowisko anotacji genomów fagowych łączące wyszukiwanie sekwencyjne oraz profilowe modele Markowa (HMM).")
+    "Wszystkie obliczenia i bazy danych są przetwarzane lokalnie na Twoim komputerze bez wysyłania danych na zewnętrzne serwery.")
 
-# --- PANEL BOCZNY: ŚCIEŻKI I BAZY DANYCH ---
-st.sidebar.header("1. Konfiguracja Środowiska")
-uploaded_file = st.sidebar.file_uploader("Wgraj genom faga (FASTA)", type=['fasta', 'fas', 'fna', 'fa'])
+# --- KONFIGURACJA ŚCIEŻEK (LOKALNY WINDOWS) ---
+st.sidebar.header("1. Ścieżki systemowe Windows")
+uploaded_file = st.sidebar.file_uploader("Wgraj genom faga (FASTA)", type=['fasta', 'fa', 'fna'])
 
-st.sidebar.subheader("Bazy Referencyjne")
-mmseqs_db = st.sidebar.text_input("Ścieżka do bazy MMseqs2", value="bazy/phrogs_mmseqs")
-hmmer_db = st.sidebar.text_input("Ścieżka do bazy HMMER (.hmm)", value="bazy/phrogs_hmmer.hmm")
+# Ścieżki do lokalnych plików .exe na Windowsie
+HMMER_BIN = st.sidebar.text_input("Ścieżka do hmmscan.exe", value="bin/hmmscan.exe")
+HMM_DB = st.sidebar.text_input("Lokalna baza HMM (np. phrogs.hmm)", value="bazy/phrogs_annotated.hmm")
+HMM_EVALUE = st.sidebar.number_input("Próg czułości HMM (E-value)", value=1e-4, format="%e")
 
-# Progi odcięcia (Cut-offs) dla e-value
-st.sidebar.subheader("Progi czułości (E-value)")
-mmseqs_evalue = st.sidebar.number_input("MMseqs2 Max E-value", value=1e-5, format="%e")
-hmmer_evalue = st.sidebar.number_input("HMMER Max E-value", value=1e-3, format="%e")
-
-# Katalog roboczy
-WORKDIR = "phage_hybrid_workdir"
+WORKDIR = "phage_local_windows_db"
 if not os.path.exists(WORKDIR):
     os.makedirs(WORKDIR)
 
 FASTA_PATH = os.path.join(WORKDIR, "genome.fasta")
-GENES_TSV = os.path.join(WORKDIR, "phanotate_genes.tsv")
 PROTEINS_FAA = os.path.join(WORKDIR, "predicted_proteins.faa")
-MMSEQS_OUT = os.path.join(WORKDIR, "mmseqs_results.tsv")
-HMMER_OUT = os.path.join(WORKDIR, "hmmer_results.txt")
-TMP_DIR = os.path.join(WORKDIR, "tmp")
+HMMER_OUT = os.path.join(WORKDIR, "hmmer_local_results.txt")
+FINAL_CSV = os.path.join(WORKDIR, "local_final_annotations.csv")
 
 
-# --- FUNKCJE BIOINFORMATYCZNE ---
+# --- LOKALNE SILNIKI BIOINFORMATYCZNE ---
 
-def translate_phanotate_to_proteins(genome_fasta, phanotate_tsv, output_faa):
-    """Translacja współrzędnych PHANOTATE na sekwencje aminokwasowe (Biopython)"""
+def local_biopython_orf_finder(genome_fasta, min_aa_len=60):
+    """Lokalny detektor genów (6 ramek odczytu) - działa w 100% na Windows"""
     record = list(SeqIO.parse(genome_fasta, "fasta"))[0]
-    genome_seq = record.seq
-    df = pd.read_csv(phanotate_tsv, sep=r'\s+', comment='#', header=None)
+    sequence = record.seq
+    orfs = []
+    orf_counter = 1
 
-    proteins = []
-    for idx, row in df.iterrows():
-        start = int(row[0]) - 1
-        end = int(row[1])
-        strand = str(row[2])
+    for strand, seq in [(1, sequence), (-1, sequence.reverse_complement())]:
+        for frame in range(3):
+            trans = seq[frame:].translate(table=11)
+            trans_len = len(trans)
+            aa_start = 0
+            while aa_start < trans_len:
+                aa_end = trans.find("*", aa_start)
+                if aa_end == -1:
+                    aa_end = trans_len
+                if (aa_end - aa_start) >= min_aa_len:
+                    if strand == 1:
+                        start_pos = frame + aa_start * 3 + 1
+                        end_pos = frame + (aa_end + 1) * 3
+                    else:
+                        gen_len = len(sequence)
+                        start_pos = gen_len - (frame + (aa_end + 1) * 3) + 1
+                        end_pos = gen_len - (frame + aa_start * 3)
 
-        gene_seq = genome_seq[start:end]
-        if strand in ['-', '-1']:
-            gene_seq = gene_seq.reverse_complement()
+                    orfs.append({
+                        "ORF_ID": f"ORF_{orf_counter}",
+                        "START": start_pos,
+                        "STOP": end_pos,
+                        "STRAND": "+" if strand == 1 else "-",
+                        "SEQUENCE": str(trans[aa_start:aa_end])
+                    })
+                    orf_counter += 1
+                aa_start = aa_end + 1
 
-        protein_seq = gene_seq.translate(table=11, to_stop=True)
-        orf_id = f"ORF_{idx + 1}"
-        prot_record = SeqRecord(protein_seq, id=orf_id, description=f"coords:{row[0]}-{row[1]}({strand})")
-        proteins.append(prot_record)
-
-    SeqIO.write(proteins, output_faa, "fasta")
-    return len(proteins)
+    df = pd.DataFrame(orfs)
+    records = [SeqRecord(Seq(row["SEQUENCE"]), id=row["ORF_ID"]) for _, row in df.iterrows()]
+    SeqIO.write(records, PROTEINS_FAA, "fasta")
+    return df
 
 
-def parse_hmmer_tblout(tblout_path):
-    """Parser dla specyficznego formatu wyjściowego --tblout z programu HMMER"""
+def parse_hmmer_with_host(tblout_path):
+    """
+    Parser wyciągający funkcję oraz taksonomię gospodarza (Host) z lokalnego pliku HMMER.
+    Szuka znaczników typu [Escherichia coli] lub 'host: Staphylococcus' w liniach opisu bazy danych.
+    """
     hmmer_data = []
     if not os.path.exists(tblout_path):
         return pd.DataFrame()
@@ -78,228 +90,135 @@ def parse_hmmer_tblout(tblout_path):
         for line in f:
             if line.startswith('#'):
                 continue
-            # Format tblout rozdzielany jest spacjami, opis jest na samym końcu (od 22 kolumny)
             parts = line.split(None, 22)
             if len(parts) >= 23:
-                target_name = parts[0]
-                query_name = parts[2]
+                target_name = parts[0]  # Nazwa hitu z bazy (np. PHROG_00123)
+                query_name = parts[2]  # Nasz ORF_X
                 evalue = float(parts[4])
-                description = parts[22].strip()
+                description = parts[22].strip()  # Pełny opis zawierający funkcję i gospodarza
+
+                # REGEKS: Szukamy nazwy organizmu w nawiasach kwadratowych [ ]
+                host_match = re.search(r'\[(.*?)\]', description)
+                host_detected = host_match.group(1) if host_match else "Nieznany (Szeroki zakres)"
+
+                # Czyszczenie opisu z tagów taksonomicznych na potrzeby ładnego wyświetlania funkcji
+                clean_desc = re.sub(r'\[(.*?)\]', '', description).strip()
+
                 hmmer_data.append({
                     "ORF_ID": query_name,
-                    "HMM_TARGET": target_name,
-                    "HMM_EVALUE": evalue,
-                    "HMM_DESC": description
+                    "HIT_DOMENY": target_name,
+                    "EVALUE": evalue,
+                    "FUNKCJA": clean_desc,
+                    "WYKRYTY_GOSPODARZ": host_detected
                 })
-    return pd.DataFrame(hmmer_data)
+
+    df = pd.DataFrame(hmmer_data)
+    if not df.empty:
+        # Zostawiamy tylko najlepsze dopasowanie dla każdego genu
+        df = df.drop_duplicates(subset=["ORF_ID"], keep="first")
+    return df
 
 
-# --- GŁÓWNY POTOK INTERFEJSU ---
+# --- INTERFEJS STREMLIT ---
 if uploaded_file is not None:
     with open(FASTA_PATH, "wb") as f:
         f.write(uploaded_file.getbuffer())
-    st.sidebar.success("Genom załadowany poprawnie.")
+    st.sidebar.success("Genom załadowany lokalnie.")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "1. Gene Calling (PHANOTATE)",
-        "2. Hybrydowa Anotacja (MMseqs2 + HMMER)",
-        "3. Zakres Gospodarza",
-        "4. Interaktywna Mapa Genomu"
-    ])
+    tab1, tab2, tab3 = st.tabs(["1. Detekcja ORF", "2. Lokalny HMMER & Analiza Gospodarza", "3. Mapa Genomu"])
 
-    # ==========================================
-    # KROK 1: PHANOTATE
-    # ==========================================
     with tab1:
-        st.header("Identyfikacja Ram Odczytu (ORF)")
-        if st.button("Uruchom PHANOTATE", key="btn_phanotate"):
-            with st.spinner("PHANOTATE mapuje genom faga..."):
-                cmd = f"phanotate {FASTA_PATH} > {GENES_TSV}"
-                res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        st.header("Krok 1: Wykrywanie genów strukturalnych faga")
+        if st.button("Uruchom Lokalny Gene-Finder"):
+            with st.spinner("Przeszukiwanie nici DNA..."):
+                df_orfs = local_biopython_orf_finder(FASTA_PATH)
+                st.success(f"Zakończono. Wykryto {len(df_orfs)} genów i zapisano sekwencje białkowe.")
+                st.dataframe(df_orfs[["ORF_ID", "START", "STOP", "STRAND"]], use_container_width=True)
+                df_orfs.to_csv(os.path.join(WORKDIR, "orfs.csv"), index=False)
 
-                if res.returncode == 0 and os.path.exists(GENES_TSV) and os.path.getsize(GENES_TSV) > 0:
-                    num_prot = translate_phanotate_to_proteins(FASTA_PATH, GENES_TSV, PROTEINS_FAA)
-                    st.success(f"Sukces! Wykryto {num_prot} genów i przetłumaczono je na sekwencje białkowe (.faa).")
-
-                    df_genes = pd.read_csv(GENES_TSV, sep=r'\s+', comment='#', header=None)
-                    df_genes.columns = ["START", "STOP", "STRAND", "FRAME", "SCORE"]
-                    df_genes.insert(0, "ORF_ID", [f"ORF_{i + 1}" for i in range(len(df_genes))])
-                    st.dataframe(df_genes, use_container_width=True)
-                else:
-                    st.error("Błąd podczas uruchamiania PHANOTATE. Sprawdź logi systemowe.")
-                    st.code(res.stderr)
-
-    # ==========================================
-    # KROK 2: HYBRYDOWA ANOTACJA (MMseqs2 -> HMMER)
-    # ==========================================
     with tab2:
-        st.header("Anotacja dwuetapowa (Szybkie dopasowanie + Analiza profili HMM)")
-        st.info(
-            "Algorytm najpierw mapuje białka przez MMseqs2. Jeśli funkcja jest nieznana (Hypothetical), HMMER analizuje strukturę domeny pod kątem odległej homologii.")
+        st.header("Krok 2: Skanowanie Profilami HMM i Mapowanie Pochodzenia")
+        st.write("Program uruchomi lokalny plik `hmmscan.exe` i przeanalizuje homologiczne domeny białkowe.")
 
         if not os.path.exists(PROTEINS_FAA):
-            st.warning("Uruchom najpierw Krok 1, aby wygenerować sekwencje białkowe.")
+            st.warning("Najpierw wykonaj Krok 1.")
         else:
-            if st.button("Uruchom Analizę Hybrydową", key="btn_annotation"):
-                # --- FAZA A: MMseqs2 ---
-                with st.spinner("Faza A: Przeszukiwanie bazy sekwencji (MMseqs2)..."):
-                    cmd_mmseqs = f"mmseqs easy-search {PROTEINS_FAA} {mmseqs_db} {MMSEQS_OUT} {TMP_DIR} --format-output 'query,target,pident,evalue,theader' -e {mmseqs_evalue} --v 0"
-                    res_mm = subprocess.run(cmd_mmseqs, shell=True, capture_output=True, text=True)
+            if st.button("Uruchom Lokalny HMMER"):
+                with st.spinner("HMMER przeszukuje lokalną bazę danych (to może chwilę potrwać)..."):
+                    # Wywołanie lokalnego narzędzia .exe na Windowsie przez subprocess
+                    cmd = f'"{HMMER_BIN}" --tblout "{HMMER_OUT}" -E {HMM_EVALUE} "{H_DB}" "{PROTEINS_FAA}"'
+                    # Uwaga: dla celów testowych upewnij się, że przekazujesz poprawne ścieżki w cudzysłowach
+                    cmd = f'"{HMMER_BIN}" --tblout {HMMER_OUT} -E {HMM_EVALUE} {HMM_DB} {PROTEINS_FAA}'
 
-                    if res_mm.returncode != 0:
-                        st.error("Błąd krytyczny MMseqs2. Sprawdź ścieżkę bazy danych.")
-                        st.code(res_mm.stderr)
-                        st.stop()
+                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
-                # --- FAZA B: HMMER ---
-                with st.spinner("Faza B: Skanowanie profilowe 'ciemnej materii' (HMMER hmmscan)..."):
-                    cmd_hmmer = f"hmmscan --tblout {HMMER_OUT} -E {hmmer_evalue} --cpu 2 {hmmer_db} {PROTEINS_FAA}"
-                    res_hm = subprocess.run(cmd_hmmer, shell=True, capture_output=True, text=True)
-
-                    if res_hm.returncode != 0:
-                        st.error("Błąd krytyczny HMMER. Upewnij się, że baza została przygotowana komendą hmmpress.")
-                        st.code(res_hm.stderr)
-                        st.stop()
-
-                st.success("Integracja danych zakończona pomyślnie!")
-
-                # --- INTEGRACJA WYNIKÓW DO MASTER TABELI ---
-                df_m_genes = pd.read_csv(GENES_TSV, sep=r'\s+', comment='#', header=None)
-                df_m_genes.columns = ["START", "STOP", "STRAND", "FRAME", "SCORE"]
-                df_m_genes.insert(0, "ORF_ID", [f"ORF_{i + 1}" for i in range(len(df_m_genes))])
-
-                # Wczytanie MMseqs2
-                if os.path.exists(MMSEQS_OUT) and os.path.getsize(MMSEQS_OUT) > 0:
-                    df_mm = pd.read_csv(MMSEQS_OUT, sep='\t', header=None,
-                                        names=["ORF_ID", "MM_TARGET", "MM_PIDENT", "MM_EVALUE", "MM_TITLE"])
-                    # Zatrzymujemy tylko najlepszy hit dla każdego ORF
-                    df_mm = df_mm.drop_duplicates(subset=["ORF_ID"], keep="first")
-                else:
-                    df_mm = pd.DataFrame(columns=["ORF_ID", "MM_TITLE", "MM_EVALUE"])
-
-                # Wczytanie HMMER
-                df_hm = parse_hmmer_tblout(HMMER_OUT)
-                if not df_hm.empty:
-                    df_hm = df_hm.drop_duplicates(subset=["ORF_ID"], keep="first")
-
-                # Łączenie w jedną ramkę danych
-                df_master = pd.merge(df_m_genes, df_mm, on="ORF_ID", how="left")
-                df_master = pd.merge(df_master, df_hm, on="ORF_ID", how="left")
-
-                # Logika hybrydowa przypisywania funkcji ostatecznej
-                final_annotations = []
-                for _, row in df_master.iterrows():
-                    mm_title = str(row.get("MM_TITLE", "NaN"))
-                    hm_desc = str(row.get("HMM_DESC", "NaN"))
-
-                    # Definiujemy, co uznajemy za brak jasnej funkcji
-                    is_mm_hypo = mm_title == "NaN" or "hypothetical" in mm_title.lower() or "unknown" in mm_title.lower()
-                    is_hm_valid = hm_desc != "NaN" and "hypothetical" not in hm_desc.lower()
-
-                    if is_mm_hypo and is_hm_valid:
-                        # HMMER uratował gen - brak trafienia w MMseqs2, ale jest trafienie domenowe HMM
-                        final_annotations.append(f"[HMMER] {hm_desc}")
-                    elif mm_title != "NaN":
-                        final_annotations.append(f"[MMseqs2] {mm_title}")
+                    if res.returncode != 0:
+                        st.error("Błąd podczas uruchamiania lokalnego hmmscan.exe. Sprawdź logi:")
+                        st.code(res.stderr)
                     else:
-                        final_annotations.append("Hypothetical protein")
+                        st.success("Skanowanie HMMER zakończone pomyślnie!")
 
-                df_master["OSTATECZNA_FUNKCJA"] = final_annotations
-                df_master.to_csv(os.path.join(WORKDIR, "master_annotations.csv"), index=False)
+                        # Integracja wyników
+                        df_orfs = pd.read_csv(os.path.join(WORKDIR, "orfs.csv"))
+                        df_hmm = parse_hmmer_with_host(HMMER_OUT)
 
-                st.dataframe(df_master[["ORF_ID", "START", "STOP", "OSTATECZNA_FUNKCJA", "MM_EVALUE", "HMM_EVALUE"]],
-                             use_container_width=True)
-
-    # ==========================================
-    # KROK 3: PREDIKCJA GOSPODARZA
-    # ==========================================
-    with tab3:
-        st.header("Analiza zakresu gospodarza (Host Range)")
-        master_path = os.path.join(WORKDIR, "master_annotations.csv")
-
-        if not os.path.exists(master_path):
-            st.warning("Ukończ krok 2 (Anotacja Hybrydowa), aby wygenerować tabele funkcjonalną.")
-        else:
-            df_master = pd.read_csv(master_path)
-            rbp_keywords = ["tail fiber", "receptor binding", "spike", "baseplate", "tail protein",
-                            "tail fiber protein"]
-
-            rbp_df = df_master[df_master["OSTATECZNA_FUNKCJA"].str.lower().str.contains('|'.join(rbp_keywords))]
-
-            if not rbp_df.empty:
-                st.success("Wykryto molekularne determinanty gospodarza (RBP):")
-                st.dataframe(rbp_df[["ORF_ID", "START", "STOP", "OSTATECZNA_FUNKCJA"]], use_container_width=True)
-
-                # Próba wyciągnięcia taksonomii bakterii
-                hosts = []
-                for f in rbp_df["OSTATECZNA_FUNKCJA"]:
-                    if "[" in f and "]" in f:
-                        hosts.append(f.split("[")[1].split("]")[0])
-
-                if hosts:
-                    st.metric(label="Najbardziej prawdopodobny gospodarz docelowy faga:", value=hosts[0])
-                    st.caption("Predykcja oparta na homologii domenowej aparatów infekcyjnych ogonka.")
-                else:
-                    st.info(
-                        "Wykryto strukturalne białka ogonka faga, lecz nagłówki baz danych nie zawierają bezpośredniej nazwy gatunkowej bakterii w nawiasach kwadratowych.")
-            else:
-                st.warning(
-                    "Brak wyraźnych markerów białek wiążących receptory. Genom może należeć do faga bezogonowego lub zawierać nieopisane dotąd motywy strukturalne.")
-
-    # ==========================================
-    # KROK 4: WIZUALIZACJA GENOMU
-    # ==========================================
-    with tab4:
-        st.header("Fizyczna mapa adnotacji genomu")
-        master_path = os.path.join(WORKDIR, "master_annotations.csv")
-
-        if os.path.exists(master_path):
-            df_master = pd.read_csv(master_path)
-            max_coord = int(df_master["STOP"].max() + 500)
-
-            zoom_range = st.slider("Wybierz okno widoku genomu (bp)", 0, max_coord, (0, min(max_coord, 20000)))
-
-            if st.button("Generuj wizualizację mapy"):
-                features = []
-                rbp_keywords = ["tail fiber", "receptor binding", "spike", "baseplate"]
-
-                for _, row in df_master.iterrows():
-                    if row["START"] >= zoom_range[0] and row["STOP"] <= zoom_range[1]:
-                        func_lower = str(row["OSTATECZNA_FUNKCJA"]).lower()
-                        strand_dir = 1 if str(row["STRAND"]) in ["+", "1", "+1"] else -1
-
-                        # Dobór palety kolorów i etykiet
-                        if any(kw in func_lower for kw in rbp_keywords):
-                            color = "#ff4b4b"  # Czerwony dla maszynerii infekcyjnej (RBP)
-                            label = f"RBP ({row['ORF_ID']})"
-                        elif "hypothetical" in func_lower:
-                            color = "#f0ad4e"  # Pomarańczowy dla hipotetycznych
-                            label = row["ORF_ID"]
+                        if df_hmm.empty:
+                            st.warning("HMMER nie znalazł żadnych dopasowań powyżej progu E-value.")
+                            df_master = df_orfs.copy()
+                            df_master["FUNKCJA"] = "Hypothetical protein"
+                            df_master["WYKRYTY_GOSPODARZ"] = "Brak danych"
                         else:
-                            color = "#4b96ff"  # Niebieski dla stałych funkcji (np. kapsyd, enzymy)
-                            label = str(row["OSTATECZNA_FUNKCJA"]).replace("[MMseqs2]", "").replace("[HMMER]",
-                                                                                                    "").strip()[
-                                        :25] + "..."
+                            df_master = pd.merge(df_orfs, df_hmm, on="ORF_ID", how="left")
+                            df_master["FUNKCJA"] = df_master["FUNKCJA"].fillna("Hypothetical protein")
+                            df_master["WYKRYTY_GOSPODARZ"] = df_master["WYKRYTY_GOSPODARZ"].fillna("Brak danych")
 
-                        features.append(GraphicFeature(start=int(row["START"]), end=int(row["STOP"]), strand=strand_dir,
-                                                       color=color, label=label))
+                        df_master.to_csv(FINAL_CSV, index=False)
+                        st.dataframe(df_master[["ORF_ID", "START", "STOP", "FUNKCJA", "WYKRYTY_GOSPODARZ", "EVALUE"]],
+                                     use_container_width=True)
+
+                        # --- SEKCJA PREDYKCJI GOSPODARZA ---
+                        st.subheader("🎯 Wynik Analizy Zakresu Gospodarza (Host Range)")
+                        # Filtrujemy tylko geny odpowiedzialne za rozpoznawanie komórki (RBP / Tail fibers)
+                        rbp_keywords = ["tail", "fiber", "receptor", "binding", "baseplate", "spike"]
+                        rbp_hits = df_master[df_master["FUNKCJA"].str.lower().str.contains('|'.join(rbp_keywords))]
+
+                        if not rbp_hits.empty:
+                            st.info(
+                                "Wykryto białka aparatu infekcyjnego faga. Oto organizmy źródłowe homologicznych domen:")
+                            st.dataframe(rbp_hits[["ORF_ID", "FUNKCJA", "WYKRYTY_GOSPODARZ"]], use_container_width=True)
+
+                            # Pobieramy najczęstszego gospodarza z wykrytych markerów RBP
+                            real_hosts = rbp_hits[rbp_hits["WYKRYTY_GOSPODARZ"] != "Brak danych"]["WYKRYTY_GOSPODARZ"]
+                            if not real_hosts.empty:
+                                predicted_host = real_hosts.mode()[0]
+                                st.metric(label="⚠️ Prawdopodobny gospodarz docelowy:", value=predicted_host)
+                        else:
+                            st.warning("Nie wykryto białek ogonka o znanej homologii taksonomicznej.")
+
+    with tab3:
+        st.header("Krok 3: Wizualizacja genomu")
+        if os.path.exists(FINAL_CSV):
+            df_master = pd.read_csv(FINAL_CSV)
+            max_c = int(df_master["STOP"].max() + 500)
+            zoom = st.slider("Wycinek genomu", 0, max_c, (0, min(max_c, 20000)))
+
+            if st.button("Generuj mapę fizyczną"):
+                features = []
+                for _, row in df_master.iterrows():
+                    if row["START"] >= zoom[0] and row["STOP"] <= zoom[1]:
+                        s = 1 if row["STRAND"] == "+" else -1
+                        func = str(row["FUNKCJA"]).lower()
+
+                        color = "#ff4b4b" if "tail" in func or "fiber" in func else (
+                            "#f0ad4e" if "hypothetical" in func else "#4b96ff")
+                        features.append(
+                            GraphicFeature(start=int(row["START"]), end=int(row["STOP"]), strand=s, color=color,
+                                           label=row["ORF_ID"]))
 
                 if features:
-                    record = GraphicRecord(sequence_length=zoom_range[1], features=features)
-                    fig, ax = plt.subplots(1, 1, figsize=(15, 5))
-                    record.plot(ax=ax, with_ruler=True, elevate_outline_annotations=True)
-                    ax.set_xlim(zoom_range[0], zoom_range[1])
-
+                    record = GraphicRecord(sequence_length=zoom[1], features=features)
+                    fig, ax = plt.subplots(figsize=(12, 4))
+                    record.plot(ax=ax, with_ruler=True)
                     st.pyplot(fig)
-
-                    # Eksport do PDF
-                    pdf_buf = io.BytesIO()
-                    fig.savefig(pdf_buf, format="pdf", bbox_inches='tight')
-                    pdf_buf.seek(0)
-                    st.download_button("Pobierz mapę (PDF)", pdf_buf, "mapa_hybrydowa.pdf", "application/pdf")
-                else:
-                    st.warning("Brak zidentyfikowanych genów w tym wycinku genomu.")
         else:
-            st.info("Mapa będzie dostępna po wygenerowaniu adnotacji w Kroku 2.")
-else:
-    st.info("Wgraj genom fagowy w formacie FASTA w lewym panelu bocznym, aby rozpocząć proces analizy.")
+            st.info("Anotuj genom w Kroku 2, aby odblokować mapowanie.")
