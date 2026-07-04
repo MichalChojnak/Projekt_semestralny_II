@@ -11,18 +11,19 @@ class EvidenceEngine:
 
         self.db = pd.read_parquet(db_path)
 
-        # 1. Automatyczne mapowanie nazw
-        if 'category' in self.db.columns and 'Kategoria' not in self.db.columns:
+        # Defensywne mapowanie nazw
+        if 'category' in self.db.columns:
             self.db.rename(columns={'category': 'Kategoria'}, inplace=True)
+        elif 'phrog' in self.db.columns and 'Kategoria' not in self.db.columns:
+            self.db.rename(columns={'phrog': 'Kategoria'}, inplace=True)
 
-        # 2. Bezpieczna Normalizacja Accession
-        self.db["Accession"] = self.db["Accession"].astype(str).fillna("")
-        self.db["Accession"] = self.db["Accession"].apply(
+        self.db['Kategoria'] = self.db['Kategoria'].fillna('Other')
+
+        self.db["Accession"] = self.db["Accession"].astype(str).apply(
             lambda x: x.split("|")[-2].replace(".1", "") if "|" in x else x.replace(".1", "")
         )
         self.db["Genus"] = self.db["Host"].astype(str).str.split().str[0]
 
-        # Statystyki do Specificity Index
         self.cat_genus_counts = self.db.groupby(['Kategoria', 'Genus']).size()
         self.cat_total_counts = self.db.groupby('Kategoria').size()
 
@@ -39,9 +40,6 @@ class EvidenceEngine:
         return cat_in_genus / total_cat
 
     def predict_host(self, annot_df, orf_df):
-        print(f"DEBUG: Rozpoczynam predykcję. Wejście DIAMOND: {len(annot_df)} wierszy.")
-
-        # Normalizacja DIAMOND subject
         annot_df = annot_df.copy()
         annot_df["subject"] = annot_df["subject"].astype(str).apply(
             lambda x: x.split("|")[-2].replace(".1", "") if "|" in x else x.replace(".1", "")
@@ -51,60 +49,64 @@ class EvidenceEngine:
         df = annot_df.merge(self.db, left_on='subject', right_on='Accession', how='left')
         df = df.merge(orf_df[['ID', 'Długość (aa)']], left_on='query', right_on='ID', how='left')
 
-        if 'Kategoria_y' in df.columns: df.rename(columns={'Kategoria_y': 'Kategoria'}, inplace=True)
+        # Zapewnienie istnienia kolumn
+        if 'Kategoria' not in df.columns:
+            df['Kategoria'] = 'Other'
+        df['Kategoria'] = df['Kategoria'].fillna('Other')
+        df['Host'] = df['Host'].fillna('Unknown')
 
-        print(f"DEBUG: Po merge: {len(df)} wierszy. Czy są dopasowania Host: {df['Host'].notna().sum()}")
+        # Upewnienie się że evalue istnieje (domyślnie 1.0 jeśli brak)
+        if 'evalue' not in df.columns:
+            df['evalue'] = 1.0
 
         genus_results = {}
-        rejected_hits = 0
 
         for _, row in df.iterrows():
-            if pd.isna(row['Host']):
-                continue  # Pomiń, jeśli brak dopasowania w bazie
+            if row['Host'] == 'Unknown': continue
 
-            # Coverage
             prot_len = row.get('Długość (aa)', 0)
             if prot_len == 0: prot_len = 1
             coverage = min((row['qend'] - row['qstart'] + 1) / prot_len, 1.0)
 
-            # FILTRY - Jeśli lista jest pusta, zakomentuj te warunki lub je poluzuj!
-            if row['pident'] < 70 or row['bitscore'] < 120 or coverage < 0.45:
-                rejected_hits += 1
+            # Filtry
+            if row['pident'] < 30 or row['bitscore'] < 50 or coverage < 0.1:
                 continue
 
             genus = row['Genus']
-            cat = row.get('Kategoria', 'Other')
+            cat = row['Kategoria']
 
-            # Scoring
             ev_w = 1.5 if cat in ["RBP", "Tail Fiber", "Tail Spike", "Depolymerase"] else (
                 0.8 if cat in ["Endolysin", "Holin"] else 0.25)
             phrog_conf = 1.3 if "PHROG" in str(row.get('stitle', '')) else 0.4
             spec_idx = self._get_specificity(cat, genus)
 
             weight = self.weights.get(cat, 1.0)
-            id_factor = 1.0 if row['pident'] > 95 else (
-                0.95 if row['pident'] > 90 else (0.8 if row['pident'] > 80 else 0.6))
+            id_factor = 1.0 if row['pident'] > 90 else (0.8 if row['pident'] > 70 else 0.4)
             bit_factor = min(row['bitscore'] / 300.0, 1.0)
 
             score = weight * id_factor * coverage * bit_factor * ev_w * phrog_conf * spec_idx
 
             if genus not in genus_results:
-                genus_results[genus] = {"score": 0, "categories": set(), "evidence": [], "hits": 0}
+                genus_results[genus] = {"score": 0, "categories": set(), "hits": 0, "evalue_sum": 0.0}
 
             genus_results[genus]["score"] += score
             genus_results[genus]["categories"].add(cat)
             genus_results[genus]["hits"] += 1
-            genus_results[genus]["evidence"].append(f"{cat} (id: {row['pident']:.1f}%)")
-
-        print(f"DEBUG: Odrzucono filtrów: {rejected_hits}. Znaleziono kandydatów: {len(genus_results)}")
+            genus_results[genus]["evalue_sum"] += float(row['evalue'])
 
         final_results = []
         for genus, data in genus_results.items():
             cat_bonus = 1 + math.log(len(data["categories"]) + 1)
             prot_bonus = 1 + math.sqrt(data["hits"]) / 5
             mod_bonus = 1.25 if len(self.ADSORPTION_MODULE.intersection(data["categories"])) >= 3 else 1.0
-            total_score = data["score"] * cat_bonus * prot_bonus * mod_bonus
 
-            final_results.append({"Host": genus, "Score": total_score, "Evidence": data["evidence"][:10]})
+            total_score = data["score"] * cat_bonus * prot_bonus * mod_bonus
+            avg_evalue = data["evalue_sum"] / data["hits"]
+
+            final_results.append({
+                "Host": genus,
+                "Score": total_score,
+                "E-value": avg_evalue
+            })
 
         return sorted(final_results, key=lambda x: x["Score"], reverse=True)

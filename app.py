@@ -12,30 +12,25 @@ from report import generate_pdf_report
 from host_database import load_host_database
 from protein_classifier import kategoryzuj_bialko, CATEGORY_COLORS
 
-# POPRAWIONY IMPORT: Importujemy tylko klasę, nie funkcje
+# POPRAWIONY IMPORT
 from src.evidence_engine import EvidenceEngine
 
+# --- KONFIGURACJA STRONY ---
+st.set_page_config(layout="wide")
 
-# --- INICJALIZACJA SILNIKA (PROFESJONALNY TRYB) ---
+# --- INICJALIZACJA SILNIKA ---
 @st.cache_resource
 def get_engine():
-    # Inicjalizuje silnik z bazą .parquet
     if os.path.exists("data/processed/phage_host_database.parquet"):
         return EvidenceEngine(db_path="data/processed/phage_host_database.parquet")
     return None
 
-
 # Dodaj to przed st.sidebar
 TAX_DF = pd.read_csv("taxonomy_final.csv")
 
-st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v7.0")
-
 # --- System logów ---
 if "logs" not in st.session_state: st.session_state["logs"] = []
-
-
 def add_log(msg): st.session_state["logs"].append(msg)
-
 
 # --- Inicjalizacja Danych ---
 HOST_DB_DF, KNOWN_GENERA = load_host_database()
@@ -157,50 +152,40 @@ if uploaded_file:
         if st.button("🚀 Uruchom Predykcję Gospodarza", type="primary"):
             if "annot_df" in st.session_state:
                 add_log("Predykcja gospodarza w toku...")
-
-                # Sprawdzenie czy mamy silnik .parquet
                 engine = get_engine()
                 if engine:
-                    # Używamy metody klasy EvidenceEngine
-                    # Zmieniono z calculate_host_scores na predict_host zgodnie z definicją klasy
                     results = engine.predict_host(st.session_state["annot_df"], st.session_state["orf_df"])
                 else:
-                    # Fallback do starej metody, jeśli baza nie istnieje
-                    # Upewnij się, że funkcja predict_host jest dostępna w zasięgu (jeśli jej używasz)
-                    results = predict_host(st.session_state["annot_df"], st.session_state["orf_df"], TAX_DF)
-
+                    st.error("Nie znaleziono silnika predykcji.")
+                    results = []
                 st.session_state["host_results"] = results
                 add_log(f"Predykcja zakończona.")
             else:
                 st.error("Uruchom najpierw zakładki 1 i 2.")
 
         if "host_results" in st.session_state:
-            # Uwaga: jeśli wyniki z EvidenceEngine są w innym formacie niż stare,
-            # tutaj może być potrzebna drobna korekta wyświetlania
-            res = st.session_state["host_results"]
+            results = st.session_state["host_results"]
+            if isinstance(results, list) and len(results) > 0:
+                # 1. Wykres (nad tabelą, pełna szerokość)
+                st.subheader("📊 Rozkład prawdopodobieństwa")
+                df_plot = pd.DataFrame(results)
+                fig_host = px.pie(df_plot, values='Score', names='Host', hole=0.4)
+                fig_host.update_layout(margin=dict(t=30, b=30, l=30, r=30))
+                st.plotly_chart(fig_host, use_container_width=True)
 
-            # Tylko jeśli wynik jest listą/słownikiem (dla przykładu)
-            if isinstance(res, list):
-                colA, colB = st.columns([1, 1])
-                with colA:
-                    st.markdown("### 🥧 Rozkład prawdopodobieństwa")
-                    chart_data = pd.DataFrame(
-                        {"Host": [r["Host"] for r in res], "Pewność": [r["Score"] for r in res]})
-                    fig_host = px.pie(chart_data, values='Pewność', names='Host', hole=0.4)
-
-                    # --- DODAJ TĘ LINIĘ ---
-                    fig_host.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-
-                    st.plotly_chart(fig_host, use_container_width=True)
-
-                with colB:
-                    st.markdown("### 📋 Lista kandydatów")
-                    res_data = [{"Host": h, "Score": f"{d['score']:.2f}", "Pewność": f"{d['confidence']:.1f}%"} for h, d
-                                in
-                                res]
-                    st.table(pd.DataFrame(res_data))
+                # 2. Tabela (pod wykresem, bez Evidence)
+                st.subheader("📋 Lista kandydatów")
+                res_data = [
+                    {
+                        "Host": r["Host"],
+                        "Score": f"{r['Score']:.2f}",
+                        "E-value": f"{r['E-value']:.2e}"
+                    }
+                    for r in results
+                ]
+                st.table(pd.DataFrame(res_data))
             else:
-                st.write(res)
+                st.info("Brak wyników predykcji.")
 
     # --- ZAKŁADKA 4: RAPORT ---
     with tab4:
