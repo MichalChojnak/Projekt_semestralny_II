@@ -5,6 +5,7 @@ import subprocess
 import os
 import plotly.graph_objects as go
 from fpdf import FPDF
+import math
 
 st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v6.1")
 
@@ -213,76 +214,107 @@ if uploaded_file:
             fig_pie.update_layout(height=400, margin=dict(t=0, b=0, l=0, r=0))
             st.plotly_chart(fig_pie, use_container_width=True)
             # -------------------------------------------
-    # ZAKŁADKA 3: PREDYKCJA HOSTA (EVIDENCE ENGINE V2)
-    with tab3:
-        st.subheader("Wielowymiarowy Host Evidence Engine (V2)")
-        if "annot_df" in st.session_state:
-            host_evidence = {}
-            evidence_details = []
+            # ZAKŁADKA 3: PREDYKCJA HOSTA (SYSTEM ZINTEGROWANY)
+            with tab3:
+                st.subheader("Host Evidence Dashboard (Wieloskładnikowy V4)")
 
-            for _, row in st.session_state["annot_df"].iterrows():
-                title, pident, bitscore, kategoria = str(row["stitle"]).lower(), row["pident"], row["bitscore"], row[
-                    "Kategoria"]
+                # 1. Konfiguracja wag (z podziałem na endolizyny i holiny)
+                PROTEIN_WEIGHTS = {
+                    "Receptor Binding Protein (RBP)": 15,
+                    "Tail Fiber": 12,
+                    "Tail Spike": 12,
+                    "Depolimerazy": 10,
+                    "Endolizyny": 8,
+                    "Baseplate": 6,
+                    "Holiny": 2,
+                    "Kapsyd": 3,
+                    "Białka portalu": 3,
+                    "Polimerazy": 2,
+                    "Terminazy": 2,
+                    "Integrazy": 2,
+                    "Pozostałe": 0.5,
+                    "Brak adnotacji (ORFan)": 0.1
+                }
 
-                # ZMIANA: Wyzerowanie wagi "Pozostałe" zgodnie z Twoim życzeniem
-                waga = PROTEIN_WEIGHTS.get(kategoria, 0) if kategoria != "Pozostałe" else 0
+                # 2. Definicja pokrewieństwa (dziedziczenie dowodów)
+                RELATED_GENERA = {
+                    "escherichia": ["salmonella", "shigella"],
+                    "salmonella": ["escherichia", "shigella"],
+                    "shigella": ["escherichia", "salmonella"]
+                }
 
-                # Obliczanie Confidence Score dla pojedynczego białka
-                if waga > 0:
-                    confidence = (bitscore / 500) * (pident / 100) * waga
 
-                    found_host = None
+                # Funkcja pomocnicza do kategoryzacji (z poprawką na Endolizyny)
+                def get_category(opis):
+                    opis = str(opis).lower()
+                    if any(x in opis for x in ["rbp", "receptor binding"]): return "Receptor Binding Protein (RBP)"
+                    if any(x in opis for x in ["tail fiber", "tailfibre"]): return "Tail Fiber"
+                    if any(x in opis for x in ["tail spike"]): return "Tail Spike"
+                    if any(x in opis for x in ["endolysin", "lysin"]): return "Endolizyny"  # Rozdzielone!
+                    if any(x in opis for x in ["holin"]): return "Holiny"
+                    if any(x in opis for x in ["depolymerase"]): return "Depolimerazy"
+                    if any(x in opis for x in ["baseplate"]): return "Baseplate"
+                    if any(x in opis for x in ["capsid", "major capsid"]): return "Kapsyd"
+                    if any(x in opis for x in ["portal"]): return "Białka portalu"
+                    if any(x in opis for x in ["polymerase"]): return "Polimerazy"
+                    if any(x in opis for x in ["terminase"]): return "Terminazy"
+                    if any(x in opis for x in ["integrase"]): return "Integrazy"
+                    return "Pozostałe"
 
-                    # SZUKANIE W NOWEJ BAZIE WIEDZY (z obsługą "phage")
-                    if KNOWN_GENERA:
+
+                if "annot_df" in st.session_state:
+                    # Inicjalizacja statystyk dla każdego znanego hosta
+                    host_stats = {genus: {'score': 0, 'categories': set()} for genus in KNOWN_GENERA}
+
+                    for _, row in st.session_state["annot_df"].iterrows():
+                        title = str(row["stitle"]).lower()
+                        kategoria = get_category(title)
+                        waga = PROTEIN_WEIGHTS.get(kategoria, 0.1)
+
+                        # Obliczanie surowego wyniku białka
+                        score = (row["bitscore"] / 500) * (row["pident"] / 100) * waga
+
+                        # 3. Logika przypisywania do hosta
                         for genus in KNOWN_GENERA:
-                            # Teraz sprawdza czy nazwa bakterii jest w opisie LUB czy jest przed "phage"
+                            # Dopasowanie bezpośrednie
                             if genus.lower() in title or f"{genus.lower()} phage" in title:
-                                found_host = f"{genus} spp."
-                                break
+                                host_stats[genus]['score'] += score
+                                host_stats[genus]['categories'].add(kategoria)
 
-                    if found_host:
-                        host_evidence[found_host] = host_evidence.get(found_host, 0) + confidence
-                        evidence_details.append(
-                            {"Host": found_host, "Białko": kategoria, "Confidence Score": round(confidence, 2),
-                             "Opis": row["stitle"]})
+                                # Dziedziczenie dla kuzynów (40% punktów)
+                                base_genus = genus.lower()
+                                if base_genus in RELATED_GENERA:
+                                    for cousin in RELATED_GENERA[base_genus]:
+                                        cousin_cap = cousin.capitalize()
+                                        if cousin_cap in host_stats:
+                                            host_stats[cousin_cap]['score'] += (score * 0.4)
+                                            host_stats[cousin_cap]['categories'].add(kategoria)
 
-            if host_evidence:
-                st.session_state["host_scores"] = host_evidence
-                total_score = sum(host_evidence.values())
+                    # 4. Obliczanie ostatecznego wyniku z bonusem za różnorodność
+                    final_results = {}
+                    for host, data in host_stats.items():
+                        if data['score'] > 0:
+                            diversity_bonus = 1 + math.log(len(data['categories']) + 1)
+                            final_results[host] = data['score'] * diversity_bonus
 
-                sorted_hosts = sorted(host_evidence.items(), key=lambda item: item[1], reverse=True)
-                top_host, top_score = sorted_hosts[0]
-                top_prob = (top_score / total_score) * 100
+                    # 5. Wyświetlanie wyników
+                    if final_results:
+                        total_points = sum(final_results.values())
+                        sorted_hosts = sorted(final_results.items(), key=lambda item: item[1], reverse=True)
 
-                st.markdown("═══════════════════════════════════")
-                st.markdown(f"### Najbardziej prawdopodobny host")
-                st.markdown(f"## 🦠 **{top_host}** ({top_prob:.1f}%)")
-                st.progress(int(top_prob))
+                        st.markdown("### Rozkład prawdopodobieństwa hosta")
 
-                st.markdown("**Kluczowe dowody białkowe z Bazy NCBI:**")
-                top_evidence = [e for e in evidence_details if e["Host"] == top_host]
-                for ev in sorted(top_evidence, key=lambda x: x["Confidence Score"], reverse=True)[:5]:
-                    st.markdown(f"✔ Homolog: **{ev['Białko']}** (Score: {ev['Confidence Score']})")
-                st.markdown("═══════════════════════════════════")
-
-                st.subheader("Pełny Ranking Kandydatów")
-                ranking_data = []
-                for host, score in sorted_hosts:
-                    prob = (score / total_score) * 100
-                    conf_level = "Wysoki" if prob > 70 else ("Średni" if prob > 20 else "Niski")
-                    ranking_data.append(
-                        {"Host": host, "Prawdopodobieństwo (%)": f"{prob:.1f}%", "Punkty Dowodowe": round(score, 2),
-                         "Zaufanie": conf_level})
-
-                st.table(pd.DataFrame(ranking_data))
-
-            else:
-                st.session_state["host_scores"] = {}
-                st.warning(
-                    "Silnik znalazł białka strukturalne, ale nie zdołał powiązać ich z żadnym gospodarzem ze 109-tysięcznej bazy. Fag może infekować rzadką, nieopisaną bakterię.")
-        else:
-            st.info("Najpierw wykonaj adnotację w Zakładce 2.")
+                        for host, score in sorted_hosts:
+                            prob = (score / total_points) * 100
+                            if prob > 3:  # Filtrujemy nieistotne wyniki poniżej 3%
+                                col1, col2, col3 = st.columns([2, 5, 1])
+                                with col1: st.write(f"**{host}**")
+                                with col2: st.progress(prob / 100)
+                                with col3: st.write(f"{prob:.1f}%")
+                    else:
+                        st.warning("Brak dopasowań w bazie danych.")
+                else:
+                    st.info("Najpierw wykonaj adnotację w Zakładce 2.")
 
     # ZAKŁADKA 4: GENEROWANIE RAPORTU
     with tab4:
