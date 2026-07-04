@@ -3,10 +3,10 @@ import pandas as pd
 from Bio import SeqIO
 import subprocess
 import os
-import plotly.express as px
+import plotly.graph_objects as go
 from fpdf import FPDF
 
-st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v3.0")
+st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v4.0")
 
 
 # --- Funkcje Bioinformatyczne ---
@@ -31,6 +31,20 @@ TAXA_MAP = {
     "typhimurium": "Salmonella typhimurium",
     "pneumoniae": "Klebsiella pneumoniae",
     "aeruginosa": "Pseudomonas aeruginosa"
+}
+
+# Paleta kolorów dla poszczególnych kategorii na mapie genomu
+CATEGORY_COLORS = {
+    "Lizyny i Holiny": "#d62728",  # Czerwony
+    "Adhezyny (RBP)": "#ff7f0e",  # Pomarańczowy
+    "Kapsyd": "#2ca02c",  # Zielony
+    "Białka ogonka": "#1f77b4",  # Niebieski
+    "Polimerazy": "#9467bd",  # Fioletowy
+    "Depolimerazy": "#8c564b",  # Brązowy
+    "Białka portalu": "#17becf",  # Cyjan
+    "Integrazy": "#e377c2",  # Różowy
+    "Pozostałe": "#7f7f7f",  # Szary
+    "Brak adnotacji (ORFan)": "#c7c7c7"  # Jasnoszary
 }
 
 
@@ -59,7 +73,6 @@ if uploaded_file:
         if st.button("Uruchom wykrywanie ORF (ATG, GTG, TTG)"):
             with st.spinner("Prodigal analizuje..."):
                 exe_path = os.path.join(os.getcwd(), "prodigal.exe")
-                # Flaga -g 11 wymusza uwzględnianie kodonów start ATG, GTG, TTG
                 subprocess.run(
                     [exe_path, "-i", "input.fasta", "-a", "proteins.faa", "-o", "genes.gff", "-q", "-g", "11"],
                     check=True)
@@ -78,21 +91,93 @@ if uploaded_file:
                 st.session_state["orf_df"] = pd.DataFrame(data)
 
         if "orf_df" in st.session_state:
-            df_plot = st.session_state["orf_df"].copy()
-            st.subheader("Interaktywna Mapa Genomu")
-            st.info(
-                "💡 Użyj kółka myszy, aby przybliżyć (zoom), oraz najedź kursorem na bloki, aby zobaczyć szczegóły ORF.")
+            has_annot = "annot_df" in st.session_state
 
-            # Przygotowanie danych do Plotly
-            df_plot["Długość_nt"] = df_plot["Stop"] - df_plot["Start"]
-            df_plot["Contig"] = "Genom"
+            if has_annot:
+                st.subheader("Interaktywna Mapa Genomu (Pokolorowana Funkcjonalnie)")
+                st.info(
+                    "💡 Kolory odpowiadają przypisanym funkcjom z Zakładki 2. Najedź kursorem na strzałki, aby zobaczyć szczegóły.")
+            else:
+                st.subheader("Interaktywna Mapa Genomu (Podstawowa)")
+                st.info(
+                    "💡 Obecnie kolory oznaczają tylko nić (+ i -). Wykonaj adnotację w Zakładce 2, aby zobaczyć mapę funkcjonalną!")
 
-            # Generowanie wykresu horyzontalnego
-            fig = px.bar(df_plot, base="Start", x="Długość_nt", y="Contig", color="Nić",
-                         orientation='h', hover_name="ID",
-                         hover_data={"Contig": False, "Start": True, "Stop": True, "Długość_nt": False,
-                                     "Długość (aa)": True},
-                         color_discrete_map={"+": "royalblue", "-": "indianred"})
+            fig = go.Figure()
+            max_stop = st.session_state["orf_df"]["Stop"].max()
+
+            # Centralna oś genomu
+            fig.add_trace(
+                go.Scatter(x=[0, max_stop], y=[0, 0], mode="lines", line=dict(color="black", width=2), hoverinfo="skip",
+                           showlegend=False))
+
+            # Dodanie legendy dla kolorów (ukryte punkty tylko do wyświetlenia w legendzie)
+            if has_annot:
+                for cat, color in CATEGORY_COLORS.items():
+                    fig.add_trace(
+                        go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=10, color=color), name=cat))
+            else:
+                fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                                         marker=dict(size=10, color="rgba(31, 119, 180, 0.8)"), name="Nić +"))
+                fig.add_trace(
+                    go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=10, color="rgba(214, 39, 40, 0.8)"),
+                               name="Nić -"))
+
+            arrow_len = max_stop * 0.015
+
+            # Rysowanie każdej strzałki jako poligonu
+            for _, row in st.session_state["orf_df"].iterrows():
+                start = row["Start"]
+                stop = row["Stop"]
+                strand = row["Nić"]
+                g_id = row["ID"]
+
+                # Domyślne wartości
+                y_base = 0.4 if strand == "+" else -0.4
+                color = "rgba(31, 119, 180, 0.8)" if strand == "+" else "rgba(214, 39, 40, 0.8)"
+                cat_text = ""
+
+                # Dynamiczne kolorowanie na podstawie adnotacji
+                if has_annot:
+                    annot_match = st.session_state["annot_df"][st.session_state["annot_df"]["query"] == g_id]
+                    if not annot_match.empty:
+                        kategoria = annot_match.iloc[0]["Kategoria"]
+                        color = CATEGORY_COLORS.get(kategoria, CATEGORY_COLORS["Pozostałe"])
+                        cat_text = f"<br>Kategoria: {kategoria}"
+                    else:
+                        color = CATEGORY_COLORS["Brak adnotacji (ORFan)"]
+                        cat_text = "<br>Kategoria: Brak adnotacji (ORFan)"
+
+                al = min(arrow_len, (stop - start) * 0.4)
+
+                if strand == '+':
+                    x_poly = [start, stop - al, stop, stop - al, start, start]
+                else:
+                    x_poly = [stop, start + al, start, start + al, stop, stop]
+
+                y_poly = [y_base - 0.25, y_base - 0.25, y_base, y_base + 0.25, y_base + 0.25, y_base - 0.25]
+
+                hover_text = f"<b>{g_id}</b><br>Start: {start}<br>Stop: {stop}<br>Nić: {strand}<br>Długość: {row['Długość (aa)']} aa{cat_text}"
+
+                fig.add_trace(go.Scatter(
+                    x=x_poly, y=y_poly,
+                    fill="toself",
+                    fillcolor=color,
+                    line=dict(color="black", width=1),
+                    name=g_id,
+                    text=hover_text,
+                    hoverinfo="text",
+                    showlegend=False
+                ))
+
+            fig.update_layout(
+                yaxis=dict(showticklabels=False, range=[-1, 1], zeroline=False),
+                xaxis=dict(title="Pozycja (nt)", showgrid=True, gridcolor='lightgray'),
+                height=400,
+                margin=dict(l=10, r=10, t=30, b=30),
+                plot_bgcolor="white",
+                hovermode="closest",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
 
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(st.session_state["orf_df"], use_container_width=True)
@@ -118,7 +203,7 @@ if uploaded_file:
             col1, col2 = st.columns([1, 2])
             with col1:
                 st.subheader("Podsumowanie funkcjonalne")
-                st.bar_chart(st.session_state["annot_df"]["Kategoria"].value_counts())
+                st.bar_chart(st.session_state["annot_df"]["Kategoria"].value_counts(), color="#1f77b4")
             with col2:
                 st.subheader("Szczegóły adnotacji")
                 st.dataframe(st.session_state["annot_df"][["query", "subject", "stitle", "Kategoria", "evalue"]],
@@ -193,7 +278,6 @@ if uploaded_file:
                         prob = (pts / total) * 100
                         pdf.cell(0, 8, usun_pl(f"- {host}: {prob:.1f}% dopasowan"), ln=True)
 
-                # Zapis i przygotowanie pliku do pobrania
                 pdf.output("raport_bioanalyzer.pdf")
                 with open("raport_bioanalyzer.pdf", "rb") as pdf_file:
                     st.download_button(
