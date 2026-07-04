@@ -1,16 +1,12 @@
-# evidence_engine.py
 import pandas as pd
-from protein_classifier import PROTEIN_WEIGHTS
-from host_database import get_host_by_sseqid
 
 
 def calculate_genome_features(orf_df):
-    # Punkt 14: Genome Features
+    """Oblicza podstawowe statystyki genomu potrzebne do raportu."""
     length = orf_df["Stop"].max() if not orf_df.empty else 0
     total_coding = (orf_df["Stop"] - orf_df["Start"]).sum()
     coding_density = (total_coding / length) * 100 if length > 0 else 0
     avg_orf = orf_df["Długość (aa)"].mean() if not orf_df.empty else 0
-
     return {
         "genome_length": length,
         "coding_density": coding_density,
@@ -18,73 +14,66 @@ def calculate_genome_features(orf_df):
     }
 
 
-def predict_host(annot_df, orf_df, host_db_df, known_genera):
-    # Punkt 7: Obliczanie coverage. Potrzebujemy długości zapytania z orf_df.
-    annot_df = annot_df.merge(orf_df[["ID", "Długość (aa)"]], left_on="query", right_on="ID", how="left")
-    annot_df["coverage"] = ((annot_df["qend"] - annot_df["qstart"] + 1) / annot_df["Długość (aa)"]) * 100
+def predict_host(annot_df, orf_df, tax_df):
+    """
+    Zaawansowany Evidence Engine:
+    1. Oblicza coverage (length/qlen).
+    2. Łączy dane z taksonomią (sseqid -> species).
+    3. Nadaje wagi: bakterie (1.0) vs fagi (0.5 jako dowód pośredni).
+    4. Zwraca listę krotek (gatunek, {'score': X, 'confidence': Y}).
+    """
 
-    # Słownik do trzymania dowodów XAI (Punkt 15)
-    host_evidence = {}
+    # 1. Obliczanie Coverage
+    annot_df["coverage"] = (annot_df["length"] / annot_df["qlen"]) * 100
 
-    # Sortowanie po bitscore, aby najlepsze trafienia przetwarzać pierwsze
-    annot_df = annot_df.sort_values(by="bitscore", ascending=False)
+    # 2. Filtracja surowa
+    hits = annot_df[(annot_df["evalue"] <= 1e-5) & (annot_df["coverage"] >= 30)].copy()
 
-    # Punkt 8: Śledzenie liczby wystąpień danego białka u konkretnego hosta
-    protein_counts_per_host = {}
+    # 3. Łączenie z bazą taksonomiczną
+    hits = hits.merge(tax_df, left_on="subject", right_on="sseqid", how="left")
 
-    for _, row in annot_df.iterrows():
-        # Punkt 6: Filtr E-value i Coverage
-        if float(row["evalue"]) > 1e-3 or row["coverage"] < 40:
-            continue
+    # 4. Nadawanie wag (Evidence-Based Phage Homology Transfer)
+    def calculate_weight(row):
+        species = str(row["species"]).lower()
+        # Jeśli trafienie jest wirusem/fagiem, traktujemy to jako dowód pośredni (waga 0.5)
+        if any(kw in species for kw in ["virus", "phage", "tequintavirus"]):
+            return 0.5
+        return 1.0  # Bezpośrednie dopasowanie do bakterii to twardy dowód (waga 1.0)
 
-        kategoria = row["Kategoria"]
-        waga_bazowa = PROTEIN_WEIGHTS.get(kategoria, 0.1)
+    hits["weight"] = hits.apply(calculate_weight, axis=1)
 
-        # Punkt 4 i 5: Oznaczanie hosta primarnie z sseqid, awaryjnie z tytułu
-        host = get_host_by_sseqid(row["subject"], host_db_df)
-        if not host:
-            # Fallback na stitle
-            for g in known_genera:
-                if g.lower() in str(row["stitle"]).lower():
-                    host = g
-                    break
+    # Obliczanie Score
+    hits["score"] = hits["bitscore"] * (hits["pident"] / 100) * (hits["coverage"] / 100) * hits["weight"]
 
-        if host:
-            host_cap = host.capitalize()
+    # 5. Agregacja
+    host_summary = hits.groupby("species").agg({
+        "score": "sum",
+        "query": "nunique"
+    }).rename(columns={"query": "protein_count"})
 
-            if host_cap not in host_evidence:
-                host_evidence[host_cap] = {
-                    "score": 0.0,
-                    "proteins_found": {},
-                    "details": []
-                }
-                protein_counts_per_host[host_cap] = {}
+    # Filtracja słabych sygnałów
+    host_summary = host_summary[host_summary["score"] > 0.5]
 
-            # Punkt 8: Malejące znaczenie (Decay function)
-            count = protein_counts_per_host[host_cap].get(kategoria, 0)
-            decay_factor = 0.5 ** count  # 1sze trafienie 100%, 2gie 50%, 3cie 25%
-            protein_counts_per_host[host_cap][kategoria] = count + 1
+    if host_summary.empty:
+        return []
 
-            score = (row["bitscore"] / 500) * (row["pident"] / 100) * waga_bazowa * decay_factor
+    # Obliczanie pewności
+    total_score = host_summary["score"].sum()
+    host_summary["confidence"] = (host_summary["score"] / total_score) * 100
 
-            host_evidence[host_cap]["score"] += score
-            host_evidence[host_cap]["proteins_found"][kategoria] = host_evidence[host_cap]["proteins_found"].get(
-                kategoria, 0) + 1
+    # Sortowanie
+    host_summary = host_summary.sort_values(by="score", ascending=False).reset_index()
 
-            # Punkt 15: Zbieranie danych do Explainable AI
-            host_evidence[host_cap]["details"].append({
-                "protein": kategoria,
-                "identity": row["pident"],
-                "bitscore": row["bitscore"],
-                "coverage": row["coverage"],
-                "subject": row["subject"]
-            })
+    # Konwersja na listę krotek (wymagane przez app.py i report.py)
+    final_results = []
+    for _, row in host_summary.iterrows():
+        final_results.append((
+            row["species"],
+            {
+                "score": row["score"],
+                "confidence": row["confidence"],
+                "protein_count": row["protein_count"]
+            }
+        ))
 
-    # Formatowanie wyników
-    final_results = {}
-    for h, data in host_evidence.items():
-        if data["score"] > 0:
-            final_results[h] = data
-
-    # Zwraca posortowaną listę krotek: (host, dane_xai)
-    return sorted(final_results.items(), key=lambda x: x[1]["score"], reverse=True)
+    return final_results

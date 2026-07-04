@@ -5,13 +5,37 @@ from Bio import SeqIO
 import subprocess
 import os
 import plotly.graph_objects as go
+import plotly.express as px
+from report import generate_pdf_report
 
-# Importy z naszych nowych modułów
+# Importy z naszych modułów
 from host_database import load_host_database
 from protein_classifier import kategoryzuj_bialko, CATEGORY_COLORS
-from evidence_engine import predict_host, calculate_genome_features
 
-st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v7.0 Modular")
+# POPRAWIONY IMPORT: Importujemy tylko klasę, nie funkcje
+from src.evidence_engine import EvidenceEngine
+
+
+# --- INICJALIZACJA SILNIKA (PROFESJONALNY TRYB) ---
+@st.cache_resource
+def get_engine():
+    # Inicjalizuje silnik z bazą .parquet
+    if os.path.exists("data/processed/phage_host_database.parquet"):
+        return EvidenceEngine(db_path="data/processed/phage_host_database.parquet")
+    return None
+
+
+# Dodaj to przed st.sidebar
+TAX_DF = pd.read_csv("taxonomy_final.csv")
+
+st.set_page_config(layout="wide", page_title="BioAnalyzer PRO v7.0")
+
+# --- System logów ---
+if "logs" not in st.session_state: st.session_state["logs"] = []
+
+
+def add_log(msg): st.session_state["logs"].append(msg)
+
 
 # --- Inicjalizacja Danych ---
 HOST_DB_DF, KNOWN_GENERA = load_host_database()
@@ -21,7 +45,8 @@ with st.sidebar:
     if HOST_DB_DF is not None:
         st.success(f"✅ Baza aktywna ({len(KNOWN_GENERA)} hostów)")
     else:
-        st.warning("⚠️ Tryb ograniczony (Brak host_database.csv)")
+        st.warning("⚠️ Tryb ograniczony")
+
     uploaded_file = st.file_uploader("Wgraj genom (FASTA)", type=["fasta", "fa"])
 
 st.title("🧬 BioAnalyzer PRO: Profesjonalna Analiza Genomowa")
@@ -33,94 +58,160 @@ if uploaded_file:
     tab1, tab2, tab3, tab4 = st.tabs([
         "1. Wykrywanie ORF",
         "2. Adnotacja DIAMOND",
-        "3. Predykcja Hosta & XAI",
+        "3. Predykcja Gospodarza",
         "4. Raport PDF"
     ])
 
-    # --- ZAKŁADKA 1 ---
+    # --- ZAKŁADKA 1: ORF ---
     with tab1:
         if st.button("Uruchom Prodigal"):
-            with st.spinner("Szukanie ORF..."):
+            with st.spinner("Prodigal analizuje genom..."):
+                add_log("Uruchomiono Prodigal...")
                 subprocess.run(["prodigal.exe", "-i", "input.fasta", "-a", "proteins.faa", "-o", "genes.gff", "-q"],
                                check=True)
                 records = list(SeqIO.parse("proteins.faa", "fasta"))
-                data = [{
-                    "ID": r.id,
-                    "Start": int(r.description.split(" # ")[1]),
-                    "Stop": int(r.description.split(" # ")[2]),
-                    "Nić": "+" if r.description.split(" # ")[3] == "1" else "-",
-                    "Długość (aa)": len(r.seq)
-                } for r in records]
+                data = [{"ID": r.id, "Start": int(r.description.split(" # ")[1]),
+                         "Stop": int(r.description.split(" # ")[2]),
+                         "Nić": "+" if r.description.split(" # ")[3] == "1" else "-", "Długość (aa)": len(r.seq)} for r
+                        in records]
                 st.session_state["orf_df"] = pd.DataFrame(data)
+                add_log("ORF wykryte pomyślnie.")
 
         if "orf_df" in st.session_state:
+            st.subheader("Interaktywna Mapa Genomu")
+            fig = go.Figure()
+            max_stop = st.session_state["orf_df"]["Stop"].max()
+            fig.add_trace(
+                go.Scatter(x=[0, max_stop], y=[0, 0], mode="lines", line=dict(color="black", width=2), hoverinfo="skip",
+                           showlegend=False))
+
+            arrow_len = max_stop * 0.015
+            has_annot = "annot_df" in st.session_state
+
+            for _, row in st.session_state["orf_df"].iterrows():
+                start, stop, strand, g_id = row["Start"], row["Stop"], row["Nić"], row["ID"]
+                y_base = 0.4 if strand == "+" else -0.4
+                color = "#1f77b4" if strand == "+" else "#d62728"
+                cat_text = ""
+
+                if has_annot:
+                    annot_match = st.session_state["annot_df"][st.session_state["annot_df"]["query"] == g_id]
+                    if not annot_match.empty:
+                        kategoria = annot_match.iloc[0]["Kategoria"]
+                        color = CATEGORY_COLORS.get(kategoria, CATEGORY_COLORS["Pozostałe"])
+                        cat_text = f"<br>Kategoria: {kategoria}"
+
+                al = min(arrow_len, (stop - start) * 0.4)
+                x_poly = [start, stop - al, stop, stop - al, start, start] if strand == '+' else [stop, start + al,
+                                                                                                  start, start + al,
+                                                                                                  stop, stop]
+                y_poly = [y_base - 0.25, y_base - 0.25, y_base, y_base + 0.25, y_base + 0.25, y_base - 0.25]
+                hover_text = f"<b>{g_id}</b><br>Start: {start}<br>Stop: {stop}<br>Nić: {strand}<br>Długość: {row['Długość (aa)']} aa{cat_text}"
+                fig.add_trace(
+                    go.Scatter(x=x_poly, y=y_poly, fill="toself", fillcolor=color, line=dict(color="black", width=1),
+                               name=g_id, text=hover_text, hoverinfo="text", showlegend=False))
+
+            fig.update_layout(yaxis=dict(showticklabels=False, range=[-1, 1], zeroline=False),
+                              xaxis=dict(title="Pozycja (nt)", showgrid=True), height=350, plot_bgcolor="white",
+                              margin=dict(l=10, r=10, t=30, b=30))
+            st.plotly_chart(fig, use_container_width=True)
             st.dataframe(st.session_state["orf_df"], use_container_width=True)
 
-    # --- ZAKŁADKA 2 ---
-    with tab2:
-        if st.button("Uruchom Adnotację DIAMOND"):
-            with st.spinner("Szukanie homologów..."):
-                cmd = ["diamond.exe", "blastp", "-d", "sprot_db.dmnd", "-q", "proteins.faa", "-o", "annot.tsv",
-                       "--outfmt", "6", "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
-                       "qstart", "qend", "sstart", "send", "evalue", "bitscore", "stitle"]
-                subprocess.run(cmd, check=True)
+        # --- ZAKŁADKA 2: DIAMOND ---
+        with tab2:
+            if st.button("Uruchom Adnotację DIAMOND"):
+                with st.spinner("DIAMOND szuka homologów..."):
+                    add_log("Uruchomiono DIAMOND...")
 
-                df = pd.read_csv("annot.tsv", sep="\t", names=[
-                    "query", "subject", "pident", "length", "mismatch", "gap",
-                    "qstart", "qend", "sstart", "send", "evalue", "bitscore", "stitle"
-                ])
-                # Punkt 11: Zmiana subject na stitle!
-                df["Kategoria"] = df["stitle"].apply(kategoryzuj_bialko)
-                st.session_state["annot_df"] = df
+                    cmd = [
+                        "diamond.exe", "blastp", "-d", "phage_db.dmnd", "-q", "proteins.faa",
+                        "-o", "annot.tsv", "--outfmt", "6", "qseqid", "sseqid", "pident",
+                        "length", "mismatch", "gapopen", "qstart", "qend", "sstart", "send",
+                        "evalue", "bitscore", "qlen", "slen", "stitle", "-k", "50"
+                    ]
+                    subprocess.run(cmd, check=True)
 
-        if "annot_df" in st.session_state:
-            st.dataframe(st.session_state["annot_df"][["query", "subject", "Kategoria", "evalue", "bitscore"]],
-                         use_container_width=True)
+                    df = pd.read_csv("annot.tsv", sep="\t", names=[
+                        "query", "subject", "pident", "length", "mismatch", "gapopen",
+                        "qstart", "qend", "sstart", "send", "evalue", "bitscore", "qlen", "slen", "stitle"
+                    ])
 
-    # --- ZAKŁADKA 3 (Punkt 3, 14, 15) ---
+                    df["stitle"] = df["stitle"].fillna("")
+                    df["Kategoria"] = df["stitle"].apply(kategoryzuj_bialko)
+
+                    st.session_state["annot_df"] = df
+                    add_log("Adnotacja zakończona.")
+
+            if "annot_df" in st.session_state:
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.markdown("### 🥧 Podział funkcjonalny")
+                    counts = st.session_state["annot_df"]["Kategoria"].value_counts()
+                    fig_pie = px.pie(values=counts.values, names=counts.index, hole=0.3)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                with col2:
+                    st.dataframe(st.session_state["annot_df"], use_container_width=True)
+
+    # --- ZAKŁADKA 3: HOST ---
     with tab3:
-        if st.button("Przewiduj Gospodarza"):
-            if "annot_df" in st.session_state and "orf_df" in st.session_state:
-                # Genome features
-                features = calculate_genome_features(st.session_state["orf_df"])
-                st.session_state["genome_features"] = features
+        if st.button("🚀 Uruchom Predykcję Gospodarza", type="primary"):
+            if "annot_df" in st.session_state:
+                add_log("Predykcja gospodarza w toku...")
 
-                # Wywołanie zewnętrznego silnika (Punkt 3)
-                results = predict_host(
-                    st.session_state["annot_df"],
-                    st.session_state["orf_df"],
-                    HOST_DB_DF,
-                    KNOWN_GENERA
-                )
+                # Sprawdzenie czy mamy silnik .parquet
+                engine = get_engine()
+                if engine:
+                    # Używamy metody klasy EvidenceEngine
+                    # Zmieniono z calculate_host_scores na predict_host zgodnie z definicją klasy
+                    results = engine.predict_host(st.session_state["annot_df"], st.session_state["orf_df"])
+                else:
+                    # Fallback do starej metody, jeśli baza nie istnieje
+                    # Upewnij się, że funkcja predict_host jest dostępna w zasięgu (jeśli jej używasz)
+                    results = predict_host(st.session_state["annot_df"], st.session_state["orf_df"], TAX_DF)
 
-                # Punkt 10: Zapisujemy wyniki do sesji dla PDF
                 st.session_state["host_results"] = results
+                add_log(f"Predykcja zakończona.")
             else:
                 st.error("Uruchom najpierw zakładki 1 i 2.")
 
-        # Wyświetlanie Explainable AI (Punkt 15)
-        if "host_results" in st.session_state and st.session_state["host_results"]:
-            st.subheader("Wyniki Predykcji (Explainable AI)")
-            best_host, data = st.session_state["host_results"][0]
+        if "host_results" in st.session_state:
+            # Uwaga: jeśli wyniki z EvidenceEngine są w innym formacie niż stare,
+            # tutaj może być potrzebna drobna korekta wyświetlania
+            res = st.session_state["host_results"]
 
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.metric(label="Najbardziej prawdopodobny gospodarz", value=best_host)
-                st.markdown("### Dlaczego?")
-                for prot, count in data["proteins_found"].items():
-                    st.markdown(f"✔ **{count}x** {prot}")
+            # Tylko jeśli wynik jest listą/słownikiem (dla przykładu)
+            if isinstance(res, list):
+                colA, colB = st.columns([1, 1])
+                with colA:
+                    st.markdown("### 🥧 Rozkład prawdopodobieństwa")
+                    chart_data = pd.DataFrame(
+                        {"Host": [r["Host"] for r in res], "Pewność": [r["Score"] for r in res]})
+                    fig_host = px.pie(chart_data, values='Pewność', names='Host', hole=0.4)
 
-                st.markdown(f"✔ Znaleziono łącznie **{len(data['details'])}** niezależnych homologów")
+                    # --- DODAJ TĘ LINIĘ ---
+                    fig_host.update_layout(margin=dict(t=0, b=0, l=0, r=0))
 
-            with col2:
-                # Ekstrakcja z genomu (Punkt 14)
-                st.markdown("### Cechy genomu")
-                gf = st.session_state["genome_features"]
-                st.write(f"- **Długość:** {gf['genome_length']:,} bp")
-                st.write(f"- **Zagęszczenie genów:** {gf['coding_density']:.1f}%")
-                st.write(f"- **Średnie ORF:** {gf['average_orf_len']:.1f} aa")
+                    st.plotly_chart(fig_host, use_container_width=True)
 
-    # --- ZAKŁADKA 4 ---
+                with colB:
+                    st.markdown("### 📋 Lista kandydatów")
+                    res_data = [{"Host": h, "Score": f"{d['score']:.2f}", "Pewność": f"{d['confidence']:.1f}%"} for h, d
+                                in
+                                res]
+                    st.table(pd.DataFrame(res_data))
+            else:
+                st.write(res)
+
+    # --- ZAKŁADKA 4: RAPORT ---
     with tab4:
-        st.write("Generowanie raportu PDF opartego na `st.session_state['host_results']`.")
-        # Tutaj wywołasz swój moduł report.py, który poprawnie zaczyta nowe wyniki.
+        if st.button("Generuj PDF"):
+            pdf_path = generate_pdf_report(uploaded_file.name, st.session_state["orf_df"],
+                                           st.session_state.get("annot_df"), st.session_state.get("host_results"))
+            with open(pdf_path, "rb") as f: st.download_button("📄 Pobierz Raport", f, "Raport.pdf", "application/pdf")
+            add_log("Raport wygenerowany.")
+
+# --- SEKCJA LOGÓW NA DOLE ---
+st.markdown("---")
+with st.expander("📜 Logi operacji"):
+    for log in reversed(st.session_state["logs"]):
+        st.text(f"• {log}")
