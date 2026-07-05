@@ -8,31 +8,27 @@ import plotly.graph_objects as go
 import plotly.express as px
 from report import generate_pdf_report
 
-# Importy z naszych modułów
+# Importy z modułów
 from host_database import load_host_database
 from protein_classifier import kategoryzuj_bialko, CATEGORY_COLORS
-
-# POPRAWIONY IMPORT
 from src.evidence_engine import EvidenceEngine
 
-# --- KONFIGURACJA STRONY ---
+# KONFIGURACJA STRONY
 st.set_page_config(layout="wide")
 
-# --- INICJALIZACJA SILNIKA ---
+# INICJALIZACJA SILNIKA
 @st.cache_resource
 def get_engine():
     if os.path.exists("data/processed/phage_host_database.parquet"):
         return EvidenceEngine(db_path="data/processed/phage_host_database.parquet")
     return None
-
-# Dodaj to przed st.sidebar
 TAX_DF = pd.read_csv("taxonomy_final.csv")
 
-# --- System logów ---
+# System logów
 if "logs" not in st.session_state: st.session_state["logs"] = []
 def add_log(msg): st.session_state["logs"].append(msg)
 
-# --- Inicjalizacja Danych ---
+# Inicjalizacja Danych
 HOST_DB_DF, KNOWN_GENERA = load_host_database()
 
 with st.sidebar:
@@ -57,7 +53,7 @@ if uploaded_file:
         "4. Raport PDF"
     ])
 
-    # --- ZAKŁADKA 1: ORF ---
+    # ZAKŁADKA 1: ORF
     with tab1:
         if st.button("Uruchom Prodigal"):
             with st.spinner("Prodigal analizuje genom..."):
@@ -112,8 +108,8 @@ if uploaded_file:
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(st.session_state["orf_df"], use_container_width=True)
 
-        # --- ZAKŁADKA 2: DIAMOND ---
-        with tab2:
+    # ZAKŁADKA 2: DIAMOND
+    with tab2:
             if st.button("Uruchom Adnotację DIAMOND"):
                 with st.spinner("DIAMOND szuka homologów..."):
                     add_log("Uruchomiono DIAMOND...")
@@ -147,7 +143,7 @@ if uploaded_file:
                 with col2:
                     st.dataframe(st.session_state["annot_df"], use_container_width=True)
 
-    # --- ZAKŁADKA 3: HOST ---
+    # ZAKŁADKA 3: HOST
     with tab3:
         if st.button("🚀 Uruchom Predykcję Gospodarza", type="primary"):
             if "annot_df" in st.session_state:
@@ -187,7 +183,7 @@ if uploaded_file:
             else:
                 st.info("Brak wyników predykcji.")
 
-    # --- ZAKŁADKA 4: RAPORT ---
+    # ZAKŁADKA 4: RAPORT
     with tab4:
         if st.button("Generuj PDF"):
             pdf_path = generate_pdf_report(uploaded_file.name, st.session_state["orf_df"],
@@ -195,7 +191,7 @@ if uploaded_file:
             with open(pdf_path, "rb") as f: st.download_button("📄 Pobierz Raport", f, "Raport.pdf", "application/pdf")
             add_log("Raport wygenerowany.")
 
-# --- SEKCJA LOGÓW NA DOLE ---
+# SEKCJA LOGÓW NA DOLE
 st.markdown("---")
 with st.expander("📜 Logi operacji"):
     for log in reversed(st.session_state["logs"]):
