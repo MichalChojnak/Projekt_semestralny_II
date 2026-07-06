@@ -12,7 +12,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
 
-# --- PEŁNY CIEMNY STYL (Kolorystyka z 1. zdjęcia, Układ z 2. zdjęcia) ---
+# GUI
 DARK_THEME_STYLE = """
     QMainWindow {
         background-color: #131920;
@@ -92,7 +92,7 @@ DARK_THEME_STYLE = """
 """
 
 
-# --- FUNKCJE ANALITYCZNE QC ---
+# FUNKCJE ANALITYCZNE QC
 def n_content(seq: str) -> float:
     return seq.count('N') / len(seq) if len(seq) > 0 else 0.0
 
@@ -131,7 +131,7 @@ def process_file(file_path: str) -> list[dict]:
     return records
 
 
-# --- GŁÓWNE OKNO APLIKACJI ---
+# GŁÓWNE OKNO APLIKACJI
 class PhageQCApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -206,15 +206,12 @@ class PhageQCApp(QMainWindow):
         top_bar_layout.addWidget(actions_group, stretch=3)
         main_layout.addLayout(top_bar_layout)
 
-        # ================= LINIA PODSUMOWANIA (Nad tabelą) =================
         self.lbl_summary = QLabel("Wszystkie: 0 | Zaakceptowane: 0 | Odrzucone: 0")
         self.lbl_summary.setStyleSheet("font-weight: bold; color: #a0aec0; padding-left: 2px;")
         main_layout.addWidget(self.lbl_summary)
 
-        # ================= SEKCJA ŚRODKOWA: TABELA (LEWO) + WYKRESY (PRAWO) =================
         content_layout = QHBoxLayout()
 
-        # Lewa strona: Tabela wyników
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -222,22 +219,18 @@ class PhageQCApp(QMainWindow):
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
-        # KLUCZOWE: Włączenie natywnego sortowania po nagłówkach
         self.table.setSortingEnabled(True)
 
         content_layout.addWidget(self.table, stretch=3)
 
-        # Prawa strona: Układ pionowy dla dwóch wykresów
         charts_sidebar = QVBoxLayout()
         charts_sidebar.setSpacing(10)
 
-        # Wykres Górny: Kołowy Podsumowania
         self.pie_fig = Figure(figsize=(4, 3), dpi=100, facecolor='#0f1319')
         self.pie_canvas = FigureCanvas(self.pie_fig)
         self.pie_canvas.setStyleSheet("border: 1px solid #1a222d; border-radius: 4px;")
         charts_sidebar.addWidget(self.pie_canvas, stretch=1)
 
-        # Wykres Dolny: Heatmapa parametrów
         self.heatmap_fig = Figure(figsize=(4, 4), dpi=100, facecolor='#0f1319')
         self.heatmap_canvas = FigureCanvas(self.heatmap_fig)
         self.heatmap_canvas.setStyleSheet("border: 1px solid #1a222d; border-radius: 4px;")
@@ -246,11 +239,10 @@ class PhageQCApp(QMainWindow):
         content_layout.addLayout(charts_sidebar, stretch=1)
         main_layout.addLayout(content_layout)
 
-        # Generowanie pustych stanów startowych dla wykresów
         self.update_pie_chart(0, 0)
         self.update_heatmap([])
 
-    # --- LOGIKA PROGRAMU ---
+    # LOGIKA PROGRAMU
     def load_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Wybierz pliki sekwencji", "",
@@ -273,7 +265,6 @@ class PhageQCApp(QMainWindow):
     def run_qc(self):
         if not self.raw_records: return
 
-        # Blokujemy sortowanie na moment wprowadzania danych, aby uniknąć błędów indeksu Qt
         self.table.setSortingEnabled(False)
 
         self.accepted_records = []
@@ -284,7 +275,6 @@ class PhageQCApp(QMainWindow):
         max_n_pct = self.max_n_spin.value() / 100.0
 
         for r in self.raw_records:
-            # Prymitywny algorytm wyliczania Quality Score (0-100)
             n_factor = max(0.0, 100.0 - (r["n_pct"] * 100 * 10))
             gc = r["gc_pct"]
             gc_factor = 100.0 if 35 <= gc <= 65 else max(0.0, 100.0 - (min(abs(gc - 35), abs(gc - 65)) * 4))
@@ -304,14 +294,12 @@ class PhageQCApp(QMainWindow):
             else:
                 self.accepted_records.append(r)
 
-        # Aktualizacja etykiety podsumowującej (dokładnie jak u Ciebie)
         self.lbl_summary.setText(
             f"Wszystkie: {len(self.raw_records)} | "
             f"Zaakceptowane: {len(self.accepted_records)} | "
             f"Odrzucone: {len(self.rejected_records)}"
         )
 
-        # Budowanie widoku tabeli
         self.table.setRowCount(len(self.raw_records))
         row = 0
         for r in self.accepted_records:
@@ -320,21 +308,16 @@ class PhageQCApp(QMainWindow):
         for r in self.rejected_records:
             self._add_table_row(row, r, "Odrzucono", r["reject_reason"], Qt.GlobalColor.red)
             row += 1
-
-        # Odblokowujemy sortowanie po załadowaniu danych - teraz użytkownik klika i sortuje!
         self.table.setSortingEnabled(True)
 
-        # Aktualizacja obu wykresów po prawej stronie
         self.update_pie_chart(len(self.accepted_records), len(self.rejected_records))
         self.update_heatmap(self.raw_records)
 
-        # Aktywacja przycisków eksportu
         self.btn_export.setEnabled(len(self.accepted_records) > 0)
         self.btn_excel.setEnabled(len(self.raw_records) > 0)
         self.btn_pdf.setEnabled(len(self.raw_records) > 0)
 
     def _add_table_row(self, row, record, status_text, reason_text, color):
-        # Do poprawnego sortowania liczb zamiast tekstu używamy metody setData()
         id_item = QTableWidgetItem(record["id"])
 
         len_item = QTableWidgetItem()
@@ -361,7 +344,7 @@ class PhageQCApp(QMainWindow):
         self.table.setItem(row, 5, status_item)
         self.table.setItem(row, 6, reason_item)
 
-    # --- GENEROWANIE WYKRESÓW W CIEMNYCH BARWACH ---
+    # GENEROWANIE WYKRESÓW
     def update_pie_chart(self, accepted, rejected):
         self.pie_fig.clear()
         ax = self.pie_fig.add_subplot(111)
@@ -394,7 +377,6 @@ class PhageQCApp(QMainWindow):
             self.heatmap_canvas.draw()
             return
 
-        # Zawężamy do max 15 wpisów na wykresie dla czytelności
         subset = records[:15]
         labels = [r["id"][:10] for r in subset]
         gc_vals = [r["gc_pct"] for r in subset]
@@ -403,7 +385,6 @@ class PhageQCApp(QMainWindow):
 
         data_matrix = np.array([gc_vals, n_vals, qs_vals]).T
 
-        # Normalizacja danych pod kolory heatmapy
         color_matrix = np.zeros_like(data_matrix, dtype=float)
         for j in range(3):
             cmax = data_matrix[:, j].max()
@@ -425,7 +406,6 @@ class PhageQCApp(QMainWindow):
         self.heatmap_fig.tight_layout()
         self.heatmap_canvas.draw()
 
-    # --- OBSŁUGA EKSPORTÓW (Metody pomocnicze) ---
     def export_excel(self):
         all_data = self.accepted_records + self.rejected_records
         if not all_data: return

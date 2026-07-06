@@ -298,6 +298,10 @@ if uploaded_file:
                 autosize=True
             )
             st.plotly_chart(fig_pie, use_container_width=True)
+            st.markdown("### 📊 Podsumowanie liczbowe kategorii")
+            counts_df = st.session_state["annot_df"]["Kategoria"].value_counts().reset_index()
+            counts_df.columns = ["Kategoria", "Liczba dopasowań"]
+            st.dataframe(counts_df, hide_index=True, width='stretch')
             df_display = st.session_state["annot_df"].copy()
             df_display["evalue"] = df_display["evalue"].apply(lambda x: "{:.2e}".format(x))
             st.dataframe(df_display, width='stretch')
