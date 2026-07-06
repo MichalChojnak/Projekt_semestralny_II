@@ -14,16 +14,14 @@ from host_database import load_host_database
 from protein_classifier import kategoryzuj_bialko, CATEGORY_COLORS
 from src.evidence_engine import EvidenceEngine
 
-# --- KONFIGURACJA STRONY ---
+# GUI
 st.set_page_config(page_title="Fagometr", page_icon="🧬", layout="wide")
 
-# Definicja profesjonalnej palety kolorów
 PROFESSIONAL_COLORS = [
     "#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
     "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#ff7f0e"
 ]
 
-# 10. ❌ Stylizacja (CSS) - Zaokrąglone przyciski, tabele, ładniejszy interfejs
 st.markdown("""
 <style>
     /* Zaokrąglone przyciski i płynne animacje */
@@ -65,23 +63,19 @@ FILE_NAMES = {
 }
 
 
-# --- FUNKCJE POMOCNICZE ---
+# FUNKCJE POMOCNICZE
 def has_orfs():
     return "orf_df" in st.session_state
-
 
 def has_annot():
     return "annot_df" in st.session_state
 
-
 if "logs" not in st.session_state:
     st.session_state["logs"] = []
-
 
 def log_step(msg):
     st.session_state["logs"].append(msg)
     st.toast(msg)
-
 
 @st.cache_resource(ttl=3600)
 def get_engine():
@@ -89,7 +83,6 @@ def get_engine():
     if os.path.exists(db_path):
         return EvidenceEngine(db_path=db_path)
     return None
-
 
 @st.cache_resource(ttl=3600)
 def safe_load_host_database():
@@ -99,8 +92,7 @@ def safe_load_host_database():
         st.error(f"⚠️ Błąd podczas ładowania bazy gospodarzy: {e}")
         return None, []
 
-
-# 4. ❌ Dodany timeout (np. godzina) zabezpieczający przed zawieszeniem programów
+# 4. timeout zabezpieczający przed zawieszeniem programów
 def run_command(cmd, task_name, timeout=3600):
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
@@ -117,8 +109,8 @@ def run_command(cmd, task_name, timeout=3600):
         st.error(f"🔴 Nie znaleziono programu: {cmd[0]}. Upewnij się, że jest zainstalowany i dostępny w PATH.")
         return False
 
+# GUI
 
-# --- GŁÓWNY INTERFEJS ---
 HOST_DB_DF, KNOWN_GENERA = safe_load_host_database()
 
 with st.sidebar:
@@ -133,7 +125,7 @@ with st.sidebar:
 st.title("🧬 Fagometr: Profesjonalna Analiza Genomowa")
 
 if uploaded_file:
-    # 3. ❌ Wykrywanie zmiany pliku i reset stanu
+    # 3. Wykrywanie zmiany pliku i reset stanu
     file_id = uploaded_file.file_id
     if "current_file_id" not in st.session_state or st.session_state["current_file_id"] != file_id:
         st.session_state["current_file_id"] = file_id
@@ -141,11 +133,11 @@ if uploaded_file:
         # Usuwamy stare wyniki
         for key in ["orf_df", "annot_df", "host_results"]:
             st.session_state.pop(key, None)
-        st.session_state["logs"] = []  # Czyścimy też logi dla nowego pliku
+        st.session_state["logs"] = []
 
-        # 2. ❌ Samooczyszczający się katalog za pomocą TemporaryDirectory
+        # Samooczyszczający się katalog za pomocą TemporaryDirectory
         if "temp_dir_obj" in st.session_state:
-            st.session_state["temp_dir_obj"].cleanup()  # Sprzątamy poprzednią sesję
+            st.session_state["temp_dir_obj"].cleanup()
 
         st.session_state["temp_dir_obj"] = tempfile.TemporaryDirectory(prefix="fagometr_")
         st.session_state["work_dir"] = st.session_state["temp_dir_obj"].name
@@ -164,9 +156,7 @@ if uploaded_file:
         "4. Raport PDF"
     ])
 
-    # ==========================================
-    # --- ZAKŁADKA 1: ORF ---
-    # ==========================================
+    # ZAKŁADKA 1: ORF
     with tab1:
         if st.button("Uruchom Prodigal"):
             proteins_path = os.path.join(work_dir, FILE_NAMES["proteins"])
