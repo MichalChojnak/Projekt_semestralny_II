@@ -11,7 +11,7 @@ class EvidenceEngine:
 
         self.db = pd.read_parquet(db_path)
 
-        # Defensywne mapowanie nazw
+        # mapowanie nazw
         if 'category' in self.db.columns:
             self.db.rename(columns={'category': 'Kategoria'}, inplace=True)
         elif 'phrog' in self.db.columns and 'Kategoria' not in self.db.columns:
@@ -49,13 +49,11 @@ class EvidenceEngine:
         df = annot_df.merge(self.db, left_on='subject', right_on='Accession', how='left')
         df = df.merge(orf_df[['ID', 'Długość (aa)']], left_on='query', right_on='ID', how='left')
 
-        # Zapewnienie istnienia kolumn
         if 'Kategoria' not in df.columns:
             df['Kategoria'] = 'Other'
         df['Kategoria'] = df['Kategoria'].fillna('Other')
         df['Host'] = df['Host'].fillna('Unknown')
 
-        # Upewnienie się że evalue istnieje (domyślnie 1.0 jeśli brak)
         if 'evalue' not in df.columns:
             df['evalue'] = 1.0
 

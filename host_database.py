@@ -16,8 +16,6 @@ def load_host_database(db_path="host_database.csv"):
         else:
             genera = set()
 
-        # Zwracamy dataframe zaindeksowany po accession (sseqid), co dramatycznie przyspieszy wyszukiwanie
-        # Założenie: kolumna z accession nazywa się 'sseqid' lub 'accession' w Twoim CSV
         if 'accession' in df.columns:
             df.set_index('accession', inplace=True)
 
@@ -27,7 +25,7 @@ def load_host_database(db_path="host_database.csv"):
 
 
 def get_host_by_sseqid(sseqid, db_df):
-    # Punkt 4 i 5: Mapowanie accession -> host
+    # Mapowanie accession -> host
     if db_df is not None and sseqid in db_df.index:
         # Zwracamy rodzaj gospodarza (np. Escherichia)
         return db_df.loc[sseqid, 'host_genus']

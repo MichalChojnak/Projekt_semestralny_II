@@ -1,7 +1,8 @@
 # protein_classifier.py
 import re
 
-# Punkt 13: Nowe wagi
+# wagi grup białek
+
 PROTEIN_WEIGHTS = {
     "Receptor Binding Protein (RBP)": 20,
     "Tail Fiber": 18,
@@ -9,7 +10,7 @@ PROTEIN_WEIGHTS = {
     "Depolimerazy": 15,
     "Adsorpcja": 14,
     "Baseplate": 10,
-    "Lizyny i Holiny": 4,  # Uśrednione wg Twojej tabeli (Endolysin 4, Holin 3) lub rozdzielone poniżej
+    "Lizyny i Holiny": 4,
     "Endolizyny": 4,
     "Holiny": 3,
     "Kapsyd": 1,
@@ -38,7 +39,7 @@ CATEGORY_COLORS = {
     "Brak adnotacji (ORFan)": "#c7c7c7"
 }
 
-# Punkt 1, 11 i 12: Jedna potężna funkcja klasyfikująca z wieloma synonimami
+# funkcja klasyfikująca z wieloma synonimami
 def kategoryzuj_bialko(stitle):
     if not isinstance(stitle, str):
         return "Pozostałe"
