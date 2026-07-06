@@ -125,7 +125,7 @@ with st.sidebar:
 st.title("🧬 Fagometr: Profesjonalna Analiza Genomowa")
 
 if uploaded_file:
-    # 3. Wykrywanie zmiany pliku i reset stanu
+    # Wykrywanie zmiany pliku i reset stanu
     file_id = uploaded_file.file_id
     if "current_file_id" not in st.session_state or st.session_state["current_file_id"] != file_id:
         st.session_state["current_file_id"] = file_id
@@ -239,9 +239,7 @@ if uploaded_file:
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(st.session_state["orf_df"], use_container_width=True)
 
-    # ==========================================
-    # --- ZAKŁADKA 2: DIAMOND ---
-    # ==========================================
+    # ZAKŁADKA 2: DIAMOND
     with tab2:
         st.info("Wymaga przeprowadzenia detekcji ORF (Zakładka 1)." if not has_orfs() else "Gotowy do adnotacji.")
 
@@ -282,8 +280,6 @@ if uploaded_file:
             st.markdown("### 🔬 Kategorie funkcjonalne")
             counts = st.session_state["annot_df"]["Kategoria"].value_counts()
 
-            # POPRAWKA: Zwiększony margines górny (t=100) i wysokość (height=500),
-            # aby etykiety się nie ucinały.
             fig_pie = px.pie(
                 values=counts.values,
                 names=counts.index,
@@ -306,9 +302,7 @@ if uploaded_file:
             df_display["evalue"] = df_display["evalue"].apply(lambda x: "{:.2e}".format(x))
             st.dataframe(df_display, width='stretch')
 
-    # ==========================================
-    # --- ZAKŁADKA 3: HOST ---
-    # ==========================================
+    # ZAKŁADKA 3: HOST
     with tab3:
         st.info("Wymaga przeprowadzenia adnotacji (Zakładka 2)." if not has_annot() else "Gotowy do predykcji.")
 
@@ -330,15 +324,11 @@ if uploaded_file:
             if isinstance(results, list) and len(results) > 0:
                 st.subheader("📊 Rozkład prawdopodobieństwa")
                 df_plot = pd.DataFrame(results)
-
-                # 1. ❌ Przeliczenie na procenty
                 total_score = df_plot['Score'].sum()
                 if total_score > 0:
                     df_plot['Procent'] = (df_plot['Score'] / total_score) * 100
                 else:
                     df_plot['Procent'] = 0
-
-                # Użycie PROFESSIONAL_COLORS dla spójności + DODANIE % NA SŁUPKACH
                 fig_host = px.bar(
                     df_plot.head(10),
                     x='Procent',
@@ -347,8 +337,6 @@ if uploaded_file:
                     color_discrete_sequence=[PROFESSIONAL_COLORS[0]],
                     title="Top Kandydaci na Gospodarza (w %)"
                 )
-
-                # DODANIE WARTOŚCI % NA BELKACH
                 fig_host.update_traces(texttemplate='%{x:.1f}%', textposition='outside')
 
                 fig_host.update_layout(yaxis={'categoryorder': 'total ascending'})
@@ -368,9 +356,7 @@ if uploaded_file:
             else:
                 st.warning("Brak znaczących wyników predykcji. Prawdopodobnie brak mocnych homologów.")
 
-    # ==========================================
     # --- ZAKŁADKA 4: RAPORT ---
-    # ==========================================
     with tab4:
         st.markdown("### Generowanie podsumowania PDF")
 
@@ -398,7 +384,7 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"🔴 Nie udało się wygenerować raportu: {e}")
 
-# --- SEKCJA LOGÓW NA DOLE STRONY ---
+# SEKCJA LOGÓW
 st.markdown("---")
 with st.expander("📜 Logi systemowe operacji"):
     if not st.session_state["logs"]:
@@ -407,7 +393,7 @@ with st.expander("📜 Logi systemowe operacji"):
         for log in reversed(st.session_state["logs"]):
             st.text(f"• {log}")
 
-# 9. ❌ Profesjonalna stopka na samym dole
+# Stopka
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 10px 0; font-family: sans-serif;">
