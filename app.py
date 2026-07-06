@@ -356,33 +356,51 @@ if uploaded_file:
             else:
                 st.warning("Brak znaczących wyników predykcji. Prawdopodobnie brak mocnych homologów.")
 
-    # --- ZAKŁADKA 4: RAPORT ---
-    with tab4:
-        st.markdown("### Generowanie podsumowania PDF")
+    # ZAKŁADKA 4: RAPORT
+        with tab4:
+            st.markdown("### Generowanie podsumowania PDF")
+            if st.button("📄 Generuj PDF", disabled=not has_orfs()):
 
-        if not has_annot() or "host_results" not in st.session_state:
-            st.warning("Analiza nie jest kompletna. Raport może nie zawierać wszystkich danych.")
+                chart_filename = None
 
-        if st.button("📄 Generuj PDF", disabled=not has_orfs()):
-            with st.spinner("Trwa składanie raportu..."):
-                try:
+                # Jeśli mamy dane adnotacji, odtwarzamy wykres i zapisujemy go jako PNG
+                if has_annot():
+                    counts = st.session_state["annot_df"]["Kategoria"].value_counts()
+                    fig_pie_export = px.pie(
+                        values=counts.values,
+                        names=counts.index,
+                        hole=0.4,
+                        color_discrete_sequence=PROFESSIONAL_COLORS
+                    )
+                    fig_pie_export.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_pie_export.update_layout(showlegend=False)
+
+                    # Zapis wykresu do pliku
+                    chart_filename = os.path.join(work_dir, "temp_chart.png")
+                    try:
+                        fig_pie_export.write_image(chart_filename)
+                    except Exception as e:
+                        st.warning(
+                            "Nie udało się zapisać wykresu. Upewnij się, że zainstalowano pakiet kaleido (pip install -U kaleido).")
+                        chart_filename = None
+
+                with st.spinner("Trwa generowanie dokumentu..."):
+                    # Wywołanie funkcji z nowym parametrem chart_path
                     pdf_path = generate_pdf_report(
-                        uploaded_file.name,
-                        st.session_state.get("orf_df"),
-                        st.session_state.get("annot_df"),
-                        st.session_state.get("host_results")
+                        filename=uploaded_file.name,
+                        orf_df=st.session_state.get("orf_df"),
+                        annot_df=st.session_state.get("annot_df"),
+                        host_results=st.session_state.get("host_results"),
+                        chart_path=chart_filename
                     )
 
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            label="⬇️ Pobierz Raport",
-                            data=f,
-                            file_name=f"Raport_Fagometr_{uploaded_file.name}.pdf",
-                            mime="application/pdf"
-                        )
-                    log_step("Raport wygenerowany pomyślnie.")
-                except Exception as e:
-                    st.error(f"🔴 Nie udało się wygenerować raportu: {e}")
+                with open(pdf_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Pobierz Raport",
+                        data=f,
+                        file_name="raport.pdf",
+                        mime="application/pdf"
+                    )
 
 # SEKCJA LOGÓW
 st.markdown("---")
