@@ -3,16 +3,18 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QSpinBox,
                              QDoubleSpinBox, QFileDialog, QTableWidget,
-                             QTableWidgetItem, QMessageBox, QHeaderView, QGroupBox)
+                             QTableWidgetItem, QMessageBox, QHeaderView, QGroupBox,
+                             QScrollArea)
 from PyQt6.QtCore import Qt
 from Bio import SeqIO
 
 # Wykresy i raporty
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.backends.backend_pdf import PdfPages  # Do obsługi wielostronicowego PDF
 import numpy as np
 
-# GUI
+# GUI - STYLE SHEETS
 DARK_THEME_STYLE = """
     QMainWindow {
         background-color: #131920;
@@ -88,6 +90,10 @@ DARK_THEME_STYLE = """
     QHeaderView::section:hover {
         background-color: #22323d;
         color: #50E3C2;
+    }
+    QScrollArea {
+        border: none;
+        background-color: #0f1319;
     }
 """
 
@@ -218,7 +224,6 @@ class PhageQCApp(QMainWindow):
             "ID Sekwencji", "Długość", "GC (%)", "N (%)", "Quality Score", "Status", "Powód / Źródło"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
         self.table.setSortingEnabled(True)
 
         content_layout.addWidget(self.table, stretch=3)
@@ -226,15 +231,21 @@ class PhageQCApp(QMainWindow):
         charts_sidebar = QVBoxLayout()
         charts_sidebar.setSpacing(10)
 
+        # Wykres kołowy podsumowania
         self.pie_fig = Figure(figsize=(4, 3), dpi=100, facecolor='#0f1319')
         self.pie_canvas = FigureCanvas(self.pie_fig)
         self.pie_canvas.setStyleSheet("border: 1px solid #1a222d; border-radius: 4px;")
         charts_sidebar.addWidget(self.pie_canvas, stretch=1)
 
+        # Wykres profilu (Heatmapa) umieszczony w QScrollArea
         self.heatmap_fig = Figure(figsize=(4, 4), dpi=100, facecolor='#0f1319')
         self.heatmap_canvas = FigureCanvas(self.heatmap_fig)
-        self.heatmap_canvas.setStyleSheet("border: 1px solid #1a222d; border-radius: 4px;")
-        charts_sidebar.addWidget(self.heatmap_canvas, stretch=1)
+
+        self.heatmap_scroll = QScrollArea()
+        self.heatmap_scroll.setWidgetResizable(True)
+        self.heatmap_scroll.setWidget(self.heatmap_canvas)
+        self.heatmap_scroll.setStyleSheet("border: 1px solid #1a222d; border-radius: 4px;")
+        charts_sidebar.addWidget(self.heatmap_scroll, stretch=1)
 
         content_layout.addLayout(charts_sidebar, stretch=1)
         main_layout.addLayout(content_layout)
@@ -377,11 +388,14 @@ class PhageQCApp(QMainWindow):
             self.heatmap_canvas.draw()
             return
 
-        subset = records[:15]
-        labels = [r["id"][:10] for r in subset]
-        gc_vals = [r["gc_pct"] for r in subset]
-        n_vals = [r["n_pct"] * 100 for r in subset]
-        qs_vals = [r["quality_score"] for r in subset]
+        labels = [r["id"][:10] for r in records]
+        gc_vals = [r["gc_pct"] for r in records]
+        n_vals = [r["n_pct"] * 100 for r in records]
+        qs_vals = [r["quality_score"] for r in records]
+
+        # Dynamiczne skalowanie wysokości wykresu pod scrollbar
+        dynamic_height = max(4.0, len(records) * 0.3)
+        self.heatmap_fig.set_size_inches(4, dynamic_height)
 
         data_matrix = np.array([gc_vals, n_vals, qs_vals]).T
 
@@ -394,8 +408,11 @@ class PhageQCApp(QMainWindow):
         ax.set_yticks(np.arange(len(labels)))
         ax.set_yticklabels(labels, fontsize=8, color='white')
         ax.set_xticks(np.arange(3))
+
+        # POPRAWKA: Przeniesienie nazw kolumn na górę i dodanie marginesu do tytułu
+        ax.xaxis.tick_top()
         ax.set_xticklabels(['% GC', '% N', 'Quality'], fontsize=9, color='white')
-        ax.set_title("Profil Parametrów QC", color='#cbd5e0', fontsize=11, weight='bold')
+        ax.set_title("Profil Parametrów QC", color='#cbd5e0', fontsize=11, weight='bold', pad=25)
 
         for i in range(len(labels)):
             for j in range(3):
@@ -405,7 +422,9 @@ class PhageQCApp(QMainWindow):
 
         self.heatmap_fig.tight_layout()
         self.heatmap_canvas.draw()
+        self.heatmap_canvas.setMinimumHeight(int(dynamic_height * 100))
 
+    # EKSPORTY I RAPORTY
     def export_excel(self):
         all_data = self.accepted_records + self.rejected_records
         if not all_data: return
@@ -427,7 +446,90 @@ class PhageQCApp(QMainWindow):
             QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać pliku: {e}")
 
     def export_pdf(self):
-        QMessageBox.information(self, "Raport PDF", "Funkcja generowania PDF została wywołana pomyślnie!")
+        all_data = self.accepted_records + self.rejected_records
+        if not all_data:
+            QMessageBox.warning(self, "Błąd", "Brak danych do wygenerowania raportu.")
+            return
+
+        # Okno wyboru ścieżki zapisu PDF
+        save_path, _ = QFileDialog.getSaveFileName(self, "Zapisz Raport PDF", "Raport_QC_Pelny.pdf",
+                                                   "Pliki PDF (*.pdf)")
+        if not save_path:
+            return
+
+        try:
+            with PdfPages(save_path) as pdf:
+                # 1. STRONA 1: Wykres kołowy podsumowania filtracji
+                pdf.savefig(self.pie_fig)
+
+                # 2. STRONA 2: Cały wykres profilu parametrów (Heatmapa)
+                pdf.savefig(self.heatmap_fig)
+
+                # 3. STRONY KOLEJNE: Tabele z wynikami sekwencji (format Landscape)
+                rows_per_page = 22
+                col_labels = ["ID Sekwencji", "Długość (bp)", "GC (%)", "N (%)", "Quality Score", "Status",
+                              "Powód / Źródło"]
+                col_widths = [0.18, 0.10, 0.09, 0.09, 0.11, 0.14, 0.29]
+
+                for i in range(0, len(all_data), rows_per_page):
+                    chunk = all_data[i:i + rows_per_page]
+
+                    fig_table = Figure(figsize=(11, 8.5), dpi=100)
+                    ax_table = fig_table.add_subplot(111)
+                    ax_table.axis('tight')
+                    ax_table.axis('off')
+
+                    cell_text = []
+                    for r in chunk:
+                        status = "Zaakceptowano" if r in self.accepted_records else "Odrzucono"
+                        reason = r.get("reject_reason", r["source"])
+                        cell_text.append([
+                            str(r["id"]),
+                            str(r["length"]),
+                            f"{r['gc_pct']:.2f}",
+                            f"{r['n_pct'] * 100:.2f}",
+                            f"{r['quality_score']:.1f}",
+                            status,
+                            str(reason)
+                        ])
+
+                    table_obj = ax_table.table(
+                        cellText=cell_text,
+                        colLabels=col_labels,
+                        loc='center',
+                        cellLoc='center',
+                        colWidths=col_widths
+                    )
+                    table_obj.auto_set_font_size(False)
+                    table_obj.set_fontsize(8)
+                    table_obj.scale(1, 1.5)
+
+                    for (row_idx, col_idx), cell in table_obj.get_celld().items():
+                        if row_idx == 0:
+                            cell.set_text_props(weight='bold', color='white')
+                            cell.set_facecolor('#1a222d')
+                        else:
+                            cell.set_text_props(color='#111111')
+                            if col_idx == 5:
+                                status_val = cell_text[row_idx - 1][5]
+                                if status_val == "Zaakceptowano":
+                                    cell.set_facecolor('#d4edda')
+                                    cell.set_text_props(color='#155724', weight='bold')
+                                else:
+                                    cell.set_facecolor('#f8d7da')
+                                    cell.set_text_props(color='#721c24', weight='bold')
+
+                    page_num = (i // rows_per_page) + 1
+                    total_pages = (len(all_data) + rows_per_page - 1) // rows_per_page
+                    fig_table.suptitle(f"Tabela Parametrów QC Wyników - Część {page_num} z {total_pages}",
+                                       fontsize=12, weight='bold', y=0.96)
+
+                    fig_table.tight_layout()
+                    pdf.savefig(fig_table)
+
+            QMessageBox.information(self, "Sukces", f"Pełny wielostronicowy raport PDF został zapisany w:\n{save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", f"Nie udało się wygenerować pełnego raportu PDF:\n{e}")
 
     def export_fasta(self):
         save_path, _ = QFileDialog.getSaveFileName(self, "Zapisz czyste FASTA", "oczyszczone.fasta",
